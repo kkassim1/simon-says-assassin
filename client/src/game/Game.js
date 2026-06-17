@@ -305,7 +305,7 @@ export class Game {
 
     } else if (type === 'escape_attempt') {
       if (data.targetId === this.myId) {
-        this.hud.addEvent('Keep mashing [E]!', 'escape');
+        this.hud.addEvent('Keep mashing [E / ACT]!', 'escape');
         this.sounds.play('hit');
       }
 

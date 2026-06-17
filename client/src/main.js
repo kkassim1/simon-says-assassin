@@ -5,7 +5,10 @@ import { InputHandler, VirtualInput } from './input/InputHandler.js';
 import { TouchControls } from './input/TouchControls.js';
 import './style.css';
 
-const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 768;
+const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+  || window.matchMedia('(pointer: coarse)').matches
+  || navigator.maxTouchPoints > 1
+  || window.innerWidth < 768;
 
 let network, lobby, game, inputHandler, touchControls;
 

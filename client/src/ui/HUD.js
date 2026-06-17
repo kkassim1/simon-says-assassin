@@ -22,7 +22,7 @@ export class HUD {
       <div id="target-arrow" style="opacity:0">▲</div>
       <div id="event-feed"></div>
       <div id="action-hint"></div>
-      <div id="escape-prompt" style="display:none">MASH [E] TO ESCAPE!</div>
+      <div id="escape-prompt" style="display:none">MASH [E / ACT] TO ESCAPE!</div>
       <div id="respawn-overlay" style="display:none">
         <div id="respawn-inner">
           <div id="respawn-label">You were eliminated</div>
