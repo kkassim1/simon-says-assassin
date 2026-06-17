@@ -218,6 +218,11 @@ export class Game {
     });
 
     net.on('player:move', (data) => {
+      if (data.id === this.myId) {
+        // Server is dragging us (we're kidnapped) — update our own position
+        if (this.isBeingKidnapped) this.player.setPosition(data.x, data.y, data.z);
+        return;
+      }
       const rp = this.remotePlayers.get(data.id);
       if (rp) rp.applyServerState(data.x, data.y, data.z, data.rot);
     });
@@ -356,6 +361,7 @@ export class Game {
         this.isBeingKidnapped = true;
         this.player.setCaptured(true);
         this.hud.showEscapePrompt(true);
+        this.hud.addEvent(`${data.actorName} is taking you somewhere — ESCAPE!`, 'kidnap');
       }
 
     } else if (type === 'escape_attempt') {
@@ -402,14 +408,6 @@ export class Game {
             this.network.sendKidnapComplete();
             this.kidnappingTarget = null;
             this.hud.setActionHint('');
-          }
-        }
-
-        if (this.kidnappingTarget) {
-          const rp = this.remotePlayers.get(this.kidnappingTarget);
-          if (rp) {
-            const fp = this.player.position.clone().add(new THREE.Vector3(1.2, 0, 0));
-            rp.applyServerState(fp.x, 0, fp.z, 0);
           }
         }
 

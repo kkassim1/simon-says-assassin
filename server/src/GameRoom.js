@@ -160,6 +160,19 @@ export class GameRoom {
     if (this.arrestedPlayers[socketId]) return;
     p.x = data.x; p.y = data.y; p.z = data.z; p.rot = data.rot;
     this.io.to(this.roomCode).emit('player:move', { id: socketId, x: p.x, y: p.y, z: p.z, rot: p.rot });
+
+    // Drag any kidnap victim alongside the kidnapper so all clients stay in sync
+    for (const [victimId, kidnapperId] of Object.entries(this.capturedStatus)) {
+      if (kidnapperId !== socketId) continue;
+      const victim = this.players.get(victimId);
+      if (victim) {
+        victim.x = p.x + 1.2;
+        victim.z = p.z;
+        this.io.to(this.roomCode).emit('player:move', {
+          id: victimId, x: victim.x, y: 0, z: victim.z, rot: victim.rot,
+        });
+      }
+    }
   }
 
   // ── Actions ──────────────────────────────────────
