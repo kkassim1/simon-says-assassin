@@ -8,6 +8,10 @@ const RESPAWN_PENALTY = 50;    // points deducted on death
 const MAX_PLAYERS     = 4;
 const MAX_HP          = 3;
 const WITNESS_RANGE   = 30;
+const COP_SPEED       = 12;    // faster than walk (10), slower than sprint (17)
+const COP_CATCH_RANGE = 3.5;
+const ARREST_DURATION = 30;    // seconds player is frozen
+const COP_TICK_MS     = 150;   // ms between cop position updates
 
 const PLAYER_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
 const PLAYER_NAMES  = ['Ghost', 'Viper', 'Raven', 'Cobra', 'Shade', 'Frost', 'Dagger', 'Storm'];
@@ -36,6 +40,10 @@ export class GameRoom {
     this.allies         = {};
 
     this.gameTimer = null;
+
+    this.activeCops      = new Map();  // copId -> { id, x, z, targetId }
+    this.arrestedPlayers = {};          // playerId -> true while arrested
+    this._copInterval    = null;
   }
 
   // ── Lobby ────────────────────────────────────────
@@ -85,7 +93,7 @@ export class GameRoom {
   }
 
   _fillBots() {
-    const needed = Math.max(0, 2 - this.players.size);
+    const needed = Math.max(0, MAX_PLAYERS - this.players.size);
     for (let i = 0; i < needed; i++) {
       const botId = `bot_${uuidv4().slice(0, 8)}`;
       const idx   = this.players.size;
@@ -149,6 +157,7 @@ export class GameRoom {
   movePlayer(socketId, data) {
     const p = this.players.get(socketId);
     if (!p || this.state !== 'playing') return;
+    if (this.arrestedPlayers[socketId]) return;
     p.x = data.x; p.y = data.y; p.z = data.z; p.rot = data.rot;
     this.io.to(this.roomCode).emit('player:move', { id: socketId, x: p.x, y: p.y, z: p.z, rot: p.rot });
   }
@@ -337,9 +346,16 @@ export class GameRoom {
   // ── Task assignment ──────────────────────────────
 
   _generateTask(playerId) {
+    const player       = this.players.get(playerId);
     const alivePlayers = this.getPlayerList()
       .filter(p => p.id !== playerId && this.aliveStatus[p.id] !== false);
-    return generateTaskForPlayer(this.players.get(playerId), alivePlayers);
+    if (player?.isBot) {
+      const realAlive = alivePlayers.filter(p => !p.isBot);
+      if (realAlive.length > 0 && Math.random() < 0.75) {
+        return generateTaskForPlayer(player, realAlive);
+      }
+    }
+    return generateTaskForPlayer(player, alivePlayers);
   }
 
   _assignNewTask(playerId) {
@@ -375,12 +391,109 @@ export class GameRoom {
   }
 
   _updateBounty() {
+    const prevTarget = this.bountyTarget;
     let topId = null, topScore = -1, secondScore = -1;
     for (const [id, score] of Object.entries(this.scores)) {
-      if (score > topScore)        { secondScore = topScore; topScore = score; topId = id; }
+      if (score > topScore)         { secondScore = topScore; topScore = score; topId = id; }
       else if (score > secondScore) { secondScore = score; }
     }
     this.bountyTarget = (topScore >= 300 && topScore - secondScore >= 300) ? topId : null;
+
+    if (this.bountyTarget && this.bountyTarget !== prevTarget) {
+      this._spawnCop(this.bountyTarget);
+    } else if (!this.bountyTarget && prevTarget) {
+      this._despawnAllCops();
+    }
+  }
+
+  // ── Cop AI ───────────────────────────────────────
+
+  _spawnCop(targetId) {
+    for (const cop of this.activeCops.values()) {
+      if (cop.targetId === targetId) return;
+    }
+    const target = this.players.get(targetId);
+    const spawnX = target ? (target.x > 0 ? -120 : 120) : 0;
+    const spawnZ = target ? (target.z > 0 ? -120 : 120) : 0;
+    const copId  = `cop_${uuidv4().slice(0, 8)}`;
+    this.activeCops.set(copId, { id: copId, x: spawnX, z: spawnZ, targetId });
+
+    this.io.to(this.roomCode).emit('cop:spawned', {
+      copId, x: spawnX, z: spawnZ,
+      targetId, targetName: target?.name || '?',
+    });
+
+    if (!this._copInterval) {
+      this._copInterval = setInterval(() => this._tickCops(), COP_TICK_MS);
+    }
+  }
+
+  _tickCops() {
+    if (this.state !== 'playing') return;
+    const dt = COP_TICK_MS / 1000;
+
+    for (const [copId, cop] of this.activeCops) {
+      if (this.arrestedPlayers[cop.targetId]) continue;
+
+      const target = this.players.get(cop.targetId);
+      if (!target || !this.aliveStatus[cop.targetId]) {
+        this._despawnCop(copId);
+        continue;
+      }
+
+      const dx = target.x - cop.x;
+      const dz = target.z - cop.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist < COP_CATCH_RANGE) {
+        this._arrestPlayer(cop.targetId, copId);
+      } else {
+        cop.x += (dx / dist) * COP_SPEED * dt;
+        cop.z += (dz / dist) * COP_SPEED * dt;
+        this.io.to(this.roomCode).emit('cop:move', { copId, x: cop.x, z: cop.z });
+      }
+    }
+  }
+
+  _arrestPlayer(playerId, copId) {
+    if (this.arrestedPlayers[playerId]) return;
+    this.arrestedPlayers[playerId] = true;
+    this.bountyTarget = null;
+
+    this.io.to(this.roomCode).emit('player:bounty', { bountyTarget: null });
+    this.io.to(this.roomCode).emit('player:arrested', {
+      playerId,
+      playerName: this.players.get(playerId)?.name,
+      duration: ARREST_DURATION,
+    });
+
+    this._despawnCop(copId);
+
+    setTimeout(() => {
+      if (this.state !== 'playing') return;
+      delete this.arrestedPlayers[playerId];
+      this.io.to(this.roomCode).emit('player:released', { playerId });
+    }, ARREST_DURATION * 1000);
+  }
+
+  _despawnCop(copId) {
+    this.activeCops.delete(copId);
+    this.io.to(this.roomCode).emit('cop:despawned', { copId });
+    if (this.activeCops.size === 0 && this._copInterval) {
+      clearInterval(this._copInterval);
+      this._copInterval = null;
+    }
+  }
+
+  _despawnAllCops() {
+    for (const copId of this.activeCops.keys()) {
+      this.io.to(this.roomCode).emit('cop:despawned', { copId });
+    }
+    this.activeCops.clear();
+    if (this._copInterval) {
+      clearInterval(this._copInterval);
+      this._copInterval = null;
+    }
   }
 
   // ── Bot AI ───────────────────────────────────────
@@ -419,6 +532,7 @@ export class GameRoom {
   endGame() {
     this.state = 'ended';
     clearTimeout(this.gameTimer);
+    this._despawnAllCops();
 
     const sorted = Array.from(this.players.values())
       .map(p => ({ ...p, score: this.scores[p.id] || 0 }))
@@ -427,5 +541,5 @@ export class GameRoom {
     this.io.to(this.roomCode).emit('game:end', { leaderboard: sorted, winner: sorted[0] });
   }
 
-  cleanup() { clearTimeout(this.gameTimer); }
+  cleanup() { clearTimeout(this.gameTimer); this._despawnAllCops(); }
 }

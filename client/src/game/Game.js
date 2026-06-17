@@ -43,6 +43,10 @@ export class Game {
     this._clock        = new THREE.Clock();
     this._respawnTimer = null;
 
+    this.cops       = new Map();  // copId -> RemotePlayer
+    this.isArrested = false;
+    this._arrestTimer = null;
+
     this._initialPlayers = playerList;
     this._meInfo         = playerList.find(p => p.id === myId);
   }
@@ -131,8 +135,14 @@ export class Game {
           this.player.setAlive(true);
           this.player.setCaptured(false);
         } else {
-          const rp = this.remotePlayers.get(p.id);
-          if (rp) { rp.applyServerState(p.x, 0, p.z, 0); rp.setAlive(true); rp.setHp(this.myMaxHp); }
+          let rp = this.remotePlayers.get(p.id);
+          if (!rp) {
+            rp = new RemotePlayer(this.scene, p.id, p.name, p.color, p.spawnIdx || 0);
+            this.remotePlayers.set(p.id, rp);
+          }
+          rp.applyServerState(p.x, 0, p.z, 0);
+          rp.setAlive(true);
+          rp.setHp(this.myMaxHp);
         }
       }
 
@@ -234,6 +244,47 @@ export class Game {
         this.sounds.play('bounty');
       }
     });
+
+    net.on('cop:spawned', (data) => {
+      const cop = new RemotePlayer(this.scene, data.copId, '🚔 COP', '#5dade2', 0);
+      cop.applyServerState(data.x, 0, data.z, 0);
+      this.cops.set(data.copId, cop);
+      if (data.targetId === this.myId) {
+        this.hud.addEvent('🚔 A COP is coming for you — SPRINT!', 'wanted');
+        this.sounds.play('wanted');
+      } else {
+        this.hud.addEvent(`🚔 COP is chasing ${data.targetName}!`, 'neutral');
+      }
+    });
+
+    net.on('cop:move', (data) => {
+      const cop = this.cops.get(data.copId);
+      if (cop) cop.applyServerState(data.x, 0, data.z, 0);
+    });
+
+    net.on('cop:despawned', (data) => {
+      const cop = this.cops.get(data.copId);
+      if (cop) { cop.dispose(); this.cops.delete(data.copId); }
+    });
+
+    net.on('player:arrested', (data) => {
+      this.hud.addEvent(`🚔 ${data.playerName} got ARRESTED! ${data.duration}s lockup`, 'trap');
+      this.sounds.play('trap');
+      if (data.playerId === this.myId) {
+        this.isArrested = true;
+        this.hud.showArrestCountdown(data.duration);
+        this._startArrestCountdown(data.duration);
+      }
+    });
+
+    net.on('player:released', (data) => {
+      if (data.playerId === this.myId) {
+        this.isArrested = false;
+        this.hud.hideArrestCountdown();
+        this.hud.addEvent('Released! Back in the game.', 'escape');
+        if (this._arrestTimer) { clearInterval(this._arrestTimer); this._arrestTimer = null; }
+      }
+    });
   }
 
   _handleGameEvent(data) {
@@ -247,6 +298,10 @@ export class Game {
         this.isBeingKidnapped = false;
         this.player.setCaptured(false);
         this.hud.showEscapePrompt(false);
+      }
+      if (this.kidnappingTarget === data.targetId) {
+        this.kidnappingTarget = null;
+        this.hud.setActionHint('');
       }
       this.scores = data.scores || this.scores;
       this.hud.setScore(this.scores[this.myId] || 0);
@@ -317,6 +372,10 @@ export class Game {
         this.player.setCaptured(false);
         this.hud.showEscapePrompt(false);
       }
+      if (this.kidnappingTarget === data.targetId) {
+        this.kidnappingTarget = null;
+        this.hud.setActionHint('');
+      }
     }
   }
 
@@ -326,8 +385,8 @@ export class Game {
 
     if (this.gameActive) {
       if (this.player.isAlive) {
-        const movement  = this.inputHandler.getMovement();
-        const sprinting = this.inputHandler.isSprinting();
+        const movement  = this.isArrested ? { x: 0, y: 0 } : this.inputHandler.getMovement();
+        const sprinting = this.isArrested ? false : this.inputHandler.isSprinting();
         this.player.update(delta, movement, sprinting);
 
         const now = Date.now();
@@ -366,6 +425,7 @@ export class Game {
     }
 
     for (const rp of this.remotePlayers.values()) rp.update(delta);
+    for (const cop of this.cops.values()) cop.update(delta);
     for (const npc of this.npcs) npc.update(delta);
     this.renderer.render(this.scene, this.player.camera);
   }
@@ -416,15 +476,31 @@ export class Game {
       return;
     }
 
+    // While dragging a hostage, navigate to the delivery location instead of the target
+    if (this.kidnappingTarget) {
+      const deliverDist = this._distToKidnapLocation();
+      const atDrop = deliverDist < KIDNAP_DELIVER_RANGE;
+      this.player.showActionRing(atDrop);
+      if (atDrop) {
+        this.hud.setActionHint('[E / ACT] — Drop hostage here!');
+        this.hud.setTargetArrow(null);
+      } else {
+        const dx = task.locationX - this.player.position.x;
+        const dz = task.locationZ - this.player.position.z;
+        this.hud.setActionHint(`📦 Bring ${task.targetName} to ${task.locationLabel} — ${Math.round(deliverDist)}m`);
+        this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+      }
+      return;
+    }
+
+    // Navigate to target player
     const dist    = this.player.position.distanceTo(target.group.position);
     const inRange = dist < ACTION_RANGE;
     this.player.showActionRing(inRange);
 
     if (inRange) {
       this.hud.setActionHint(
-        this.kidnappingTarget ? '[E / ACT] — Deliver hostage'
-        : task.type === 'kill' ? '[E / ACT] — Eliminate target'
-        : '[E / ACT] — Grab target'
+        task.type === 'kill' ? '[E / ACT] — Eliminate target' : '[E / ACT] — Grab target'
       );
       this.hud.setTargetArrow(null);
     } else {
@@ -465,6 +541,16 @@ export class Game {
     }, 1000);
   }
 
+  _startArrestCountdown(seconds) {
+    if (this._arrestTimer) clearInterval(this._arrestTimer);
+    let remaining = seconds;
+    this._arrestTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) { clearInterval(this._arrestTimer); this._arrestTimer = null; return; }
+      this.hud.showArrestCountdown(remaining);
+    }, 1000);
+  }
+
   _distToKidnapLocation() {
     const task = this.myTask;
     if (!task) return Infinity;
@@ -482,6 +568,9 @@ export class Game {
   destroy() {
     cancelAnimationFrame(this._animId);
     if (this._respawnTimer) clearInterval(this._respawnTimer);
+    if (this._arrestTimer) clearInterval(this._arrestTimer);
+    for (const cop of this.cops.values()) cop.dispose();
+    this.cops.clear();
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }

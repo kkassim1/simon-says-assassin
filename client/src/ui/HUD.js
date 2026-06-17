@@ -13,7 +13,7 @@ export class HUD {
         <span id="health-label">HP</span>
       </div>
       <div id="ally-info" style="display:none"></div>
-      <div id="bounty-banner" style="display:none">💰 YOU HAVE A BOUNTY — stay alive!</div>
+      <div id="bounty-banner" style="display:none">💰 BOUNTY on YOU — 🚔 COP IS COMING!</div>
       <div id="simon-banner"></div>
       <div id="task-box">
         <div id="task-icon">🎯</div>
@@ -28,6 +28,13 @@ export class HUD {
           <div id="respawn-label">You were eliminated</div>
           <div id="respawn-count">15</div>
           <div id="respawn-sub">seconds until respawn • -50 pts</div>
+        </div>
+      </div>
+      <div id="arrest-overlay" style="display:none">
+        <div id="arrest-inner">
+          <div id="arrest-label">🚔 YOU'VE BEEN ARRESTED</div>
+          <div id="arrest-count">30</div>
+          <div id="arrest-sub">seconds until release • bounty cleared</div>
         </div>
       </div>
       <div id="damage-flash"></div>
@@ -125,6 +132,18 @@ export class HUD {
 
   hideRespawn() {
     this.el.querySelector('#respawn-overlay').style.display = 'none';
+  }
+
+  // ── Arrest overlay ───────────────────────────────
+
+  showArrestCountdown(seconds) {
+    const overlay = this.el.querySelector('#arrest-overlay');
+    overlay.style.display = 'flex';
+    this.el.querySelector('#arrest-count').textContent = seconds;
+  }
+
+  hideArrestCountdown() {
+    this.el.querySelector('#arrest-overlay').style.display = 'none';
   }
 
   // ── Damage flash ─────────────────────────────────
