@@ -302,6 +302,8 @@ export class Game {
     if (type === 'player_killed' || type === 'kidnap_complete') {
       const rp = this.remotePlayers.get(data.targetId);
       if (rp) rp.setAlive(false);
+      const attackerRp = this.remotePlayers.get(data.actorId);
+      if (attackerRp) attackerRp.flashAttack();
       if (data.targetId === this.myId) {
         this.player.setAlive(false);
         this.isBeingKidnapped = false;
@@ -325,6 +327,8 @@ export class Game {
     } else if (type === 'betrayal_kill') {
       const rp = this.remotePlayers.get(data.targetId);
       if (rp) rp.setAlive(false);
+      const betrayerRp = this.remotePlayers.get(data.actorId);
+      if (betrayerRp) betrayerRp.flashAttack();
       if (data.targetId === this.myId) {
         this.player.setAlive(false);
         this.isBeingKidnapped = false;
@@ -344,6 +348,8 @@ export class Game {
     } else if (type === 'player_damaged') {
       const rp = this.remotePlayers.get(data.targetId);
       if (rp) { rp.flashDamage(); rp.setHp(data.hp); }
+      const attackerRp = this.remotePlayers.get(data.actorId);
+      if (attackerRp) attackerRp.flashAttack();
       if (data.targetId === this.myId) {
         this.myHp = data.hp;
         this.hud.setHealth(data.hp, data.maxHp);

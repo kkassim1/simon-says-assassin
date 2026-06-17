@@ -53,6 +53,12 @@ export class RemotePlayer {
     setTimeout(() => this.bodyMat.color.copy(orig), 280);
   }
 
+  flashAttack() {
+    const orig = this.bodyMat.color.clone();
+    this.bodyMat.color.setHex(0xffcc00);
+    setTimeout(() => this.bodyMat.color.copy(orig), 220);
+  }
+
   applyServerState(x, y, z, rot) {
     this.targetPos.set(x, y, z);
     this.targetRot = rot;

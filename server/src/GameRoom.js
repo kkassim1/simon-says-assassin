@@ -47,6 +47,7 @@ export class GameRoom {
     this.arrestedPlayers = {};          // playerId -> true while arrested
     this._copInterval    = null;
     this.escapeAttempts  = {};          // victimId -> attempt count
+    this._botMoveInterval = null;
   }
 
   // ── Lobby ────────────────────────────────────────
@@ -75,6 +76,7 @@ export class GameRoom {
       for (const [victimId, kidnapperId] of Object.entries(this.capturedStatus)) {
         if (kidnapperId === socketId) {
           this.capturedStatus[victimId] = null;
+          delete this.escapeAttempts[victimId];
           this.io.to(this.roomCode).emit('game:event', {
             type: 'escaped', targetId: victimId,
             targetName: this.players.get(victimId)?.name,
@@ -94,6 +96,7 @@ export class GameRoom {
     delete this.scores[socketId];
     delete this.tasks[socketId];
     delete this.capturedStatus[socketId];
+    delete this.escapeAttempts[socketId];
     delete this.aliveStatus[socketId];
     delete this.playerHp[socketId];
     delete this.wantedLevel[socketId];
@@ -577,6 +580,34 @@ export class GameRoom {
     for (const [id, player] of this.players) {
       if (player.isBot) this._botTick(id, 5000 + Math.random() * 10000);
     }
+    this._botMoveInterval = setInterval(() => this._tickBotMovement(), 250);
+  }
+
+  _tickBotMovement() {
+    if (this.state !== 'playing') return;
+    const BOT_SPEED = 8;
+    const dt = 0.25;
+
+    for (const [id, player] of this.players) {
+      if (!player.isBot || !this.aliveStatus[id]) continue;
+      const task = this.tasks[id];
+      if (!task || !task.targetId || task.type === 'survive') continue;
+
+      const target = this.players.get(task.targetId);
+      if (!target || !this.aliveStatus[task.targetId]) continue;
+
+      const dx = target.x - player.x;
+      const dz = target.z - player.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > 2) {
+        player.x += (dx / dist) * BOT_SPEED * dt;
+        player.z += (dz / dist) * BOT_SPEED * dt;
+        player.rot = Math.atan2(dx, dz);
+        this.io.to(this.roomCode).emit('player:move', {
+          id, x: player.x, y: 0, z: player.z, rot: player.rot,
+        });
+      }
+    }
   }
 
   _botTick(botId, delay = 10000) {
@@ -590,15 +621,23 @@ export class GameRoom {
         return;
       }
 
-      if (task.type === 'kill') {
-        this.attemptKill(botId, task.targetId);
-      } else if (task.type === 'kidnap') {
-        this.startKidnap(botId, task.targetId);
-        setTimeout(() => { if (this.state === 'playing') this.completeKidnap(botId); },
-          6000 + Math.random() * 5000);
+      const bot    = this.players.get(botId);
+      const target = this.players.get(task.targetId);
+      if (bot && target) {
+        const dx = bot.x - target.x, dz = bot.z - target.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist <= ACTION_RANGE) {
+          if (task.type === 'kill') {
+            this.attemptKill(botId, task.targetId);
+          } else if (task.type === 'kidnap') {
+            this.startKidnap(botId, task.targetId);
+            setTimeout(() => { if (this.state === 'playing') this.completeKidnap(botId); },
+              6000 + Math.random() * 5000);
+          }
+        }
       }
 
-      this._botTick(botId, 10000 + Math.random() * 12000);
+      this._botTick(botId, 6000 + Math.random() * 8000);
     }, delay);
   }
 
@@ -608,6 +647,7 @@ export class GameRoom {
     this.state = 'ended';
     clearTimeout(this.gameTimer);
     this._despawnAllCops();
+    if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
 
     const sorted = Array.from(this.players.values())
       .map(p => ({ ...p, score: this.scores[p.id] || 0 }))
@@ -616,5 +656,9 @@ export class GameRoom {
     this.io.to(this.roomCode).emit('game:end', { leaderboard: sorted, winner: sorted[0] });
   }
 
-  cleanup() { clearTimeout(this.gameTimer); this._despawnAllCops(); }
+  cleanup() {
+    clearTimeout(this.gameTimer);
+    this._despawnAllCops();
+    if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
+  }
 }
