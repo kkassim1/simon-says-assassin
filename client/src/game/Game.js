@@ -384,6 +384,16 @@ export class Game {
         this.hud.addEvent(`${data.actorName} is taking you somewhere — ESCAPE!`, 'kidnap');
       }
 
+    } else if (type === 'waypoint_reached') {
+      if (data.actorId === this.myId && this.myTask) {
+        this.myTask.currentWaypoint = data.waypoint;
+        this.hud.addEvent(`Checkpoint reached! Head to ${data.nextLabel}`, 'neutral');
+      }
+    } else if (type === 'patrol_complete') {
+      this.scores = data.scores || this.scores;
+      this.hud.setScore(this.scores[this.myId] || 0);
+      this.hud.addEvent(data.message, 'neutral');
+
     } else if (type === 'escape_attempt') {
       if (data.targetId === this.myId) {
         this.hud.addEvent('Keep mashing [E / ACT]!', 'escape');
@@ -481,6 +491,17 @@ export class Game {
     const task = this.myTask;
     if (!task || !task.targetId) {
       this.player.showActionRing(false);
+      if (task?.type === 'survive' && task.waypoints) {
+        const wp = task.waypoints[task.currentWaypoint];
+        if (wp) {
+          const dx = wp.x - this.player.position.x;
+          const dz = wp.z - this.player.position.z;
+          const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
+          this.hud.setActionHint(`📍 Patrol: head to ${wp.label} — ${dist}m (${task.currentWaypoint + 1}/${task.waypoints.length})`);
+          this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+          return;
+        }
+      }
       this.hud.setActionHint(task?.type === 'survive' ? 'Stay alive!' : '');
       this.hud.setTargetArrow(null);
       return;

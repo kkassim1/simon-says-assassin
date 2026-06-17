@@ -52,7 +52,17 @@ export function generateTaskForPlayer(player, alivePlayers) {
 }
 
 function _makeSurviveTask() {
-  return { type: 'survive', simonSays: true, label: 'Simon says: Survive', points: 150, trap: false };
+  const shuffled = [...KIDNAP_LOCATIONS].sort(() => Math.random() - 0.5).slice(0, 2);
+  const waypoints = shuffled.map(loc => ({ x: loc.x, z: loc.z, label: loc.label }));
+  return {
+    type: 'survive',
+    simonSays: true,
+    label: `Simon says: Patrol ${waypoints.map(w => w.label).join(' → ')}`,
+    points: 200,
+    trap: false,
+    waypoints,
+    currentWaypoint: 0,
+  };
 }
 
 function _pick(arr) {

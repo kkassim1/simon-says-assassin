@@ -204,6 +204,36 @@ export class GameRoom {
         });
       }
     }
+
+    // Advance survive patrol waypoints
+    const task = this.tasks[socketId];
+    if (task?.type === 'survive' && task.waypoints) {
+      const wp = task.waypoints[task.currentWaypoint];
+      if (wp) {
+        const dx = p.x - wp.x, dz = p.z - wp.z;
+        if (Math.sqrt(dx * dx + dz * dz) < 8) {
+          task.currentWaypoint++;
+          if (task.currentWaypoint >= task.waypoints.length) {
+            this.scores[socketId] = (this.scores[socketId] || 0) + task.points;
+            this.io.to(this.roomCode).emit('game:event', {
+              type: 'patrol_complete', actorId: socketId,
+              actorName: p.name,
+              message: `${p.name} completed their patrol! +${task.points} pts`,
+              scores: this.scores,
+            });
+            setTimeout(() => this._assignNewTask(socketId), 500);
+          } else {
+            const next = task.waypoints[task.currentWaypoint];
+            this.io.to(this.roomCode).emit('game:event', {
+              type: 'waypoint_reached', actorId: socketId,
+              waypoint: task.currentWaypoint,
+              nextX: next.x, nextZ: next.z, nextLabel: next.label,
+              message: `${p.name} reached a checkpoint! Next: ${next.label}`,
+            });
+          }
+        }
+      }
+    }
   }
 
   // ── Actions ──────────────────────────────────────
@@ -616,7 +646,12 @@ export class GameRoom {
       if (!this.aliveStatus[botId]) { this._botTick(botId, 3000); return; }
 
       const task = this.tasks[botId];
-      if (!task || task.trap || !task.targetId || !this.aliveStatus[task.targetId]) {
+      if (!task || task.type === 'survive') {
+        this._assignNewTask(botId);
+        this._botTick(botId, 5000);
+        return;
+      }
+      if (task.trap || !task.targetId || !this.aliveStatus[task.targetId]) {
         this._botTick(botId, 4000);
         return;
       }
