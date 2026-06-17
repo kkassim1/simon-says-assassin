@@ -36,7 +36,60 @@ export class Lobby {
 
         <div id="lobby-error" style="display:none"></div>
 
+        <button id="btn-how-to-play" class="lobby-btn secondary" style="margin-top:4px">❓ How to Play</button>
+
         <div id="demo-notice">Free demo: 3 games remaining</div>
+      </div>
+
+      <div id="instructions-overlay" style="display:none">
+        <div id="instructions-panel">
+          <button id="btn-close-instructions">✕</button>
+          <h2>How to Play</h2>
+
+          <div class="instr-section">
+            <h3>🎮 Controls</h3>
+            <div class="instr-cols">
+              <div class="instr-col">
+                <strong>⌨️ Keyboard</strong>
+                <ul>
+                  <li>WASD / Arrows — Move</li>
+                  <li>E or Space — Act</li>
+                  <li>Shift — Sprint</li>
+                </ul>
+              </div>
+              <div class="instr-col">
+                <strong>📱 Mobile</strong>
+                <ul>
+                  <li>Left joystick — Move</li>
+                  <li>ACT button — Act</li>
+                  <li>RUN button — Sprint</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="instr-section">
+            <h3>🎯 Missions</h3>
+            <ul>
+              <li>🔪 <strong>Kill</strong> — Get close to target, press Act to eliminate (+300 pts)</li>
+              <li>🪢 <strong>Kidnap</strong> — Grab target with Act, follow the arrow to the drop-off location (+500 pts)</li>
+              <li>🛡️ <strong>Survive</strong> — Stay alive for bonus points</li>
+              <li>⚠️ <strong>TRAP</strong> — Tasks without "Simon says" are traps! Doing them costs -200 pts</li>
+            </ul>
+          </div>
+
+          <div class="instr-section">
+            <h3>⚡ Key Rules</h3>
+            <ul>
+              <li>🤝 You have a <strong>secret ally</strong> — work together or betray them for +400 bonus</li>
+              <li>⭐ Being seen committing crimes raises your <strong>Wanted</strong> level</li>
+              <li>💰 The top player gets a <strong>Bounty</strong> — everyone can earn +200 for eliminating them</li>
+              <li>🚔 A <strong>Cop</strong> will chase the bounty player — get caught = 30s arrest</li>
+              <li>If kidnapped, <strong>mash Act</strong> repeatedly to break free</li>
+              <li>Dying costs -50 pts and a 15s respawn penalty</li>
+            </ul>
+          </div>
+        </div>
       </div>
     `;
     container.appendChild(this.el);
@@ -67,6 +120,14 @@ export class Lobby {
 
     this.el.querySelector('#btn-start').addEventListener('click', () => {
       this.network.startGame();
+    });
+
+    this.el.querySelector('#btn-how-to-play').addEventListener('click', () => {
+      this.el.querySelector('#instructions-overlay').style.display = 'flex';
+    });
+
+    this.el.querySelector('#btn-close-instructions').addEventListener('click', () => {
+      this.el.querySelector('#instructions-overlay').style.display = 'none';
     });
 
     this.el.querySelector('#room-code-input').addEventListener('input', (e) => {

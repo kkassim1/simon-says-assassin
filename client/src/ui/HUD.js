@@ -7,6 +7,32 @@ export class HUD {
         <div id="timer-display">⏱ <span id="timer-val">10:00</span></div>
         <div id="score-display">Score: <span id="score-val">0</span></div>
         <div id="wanted-display" style="display:none"></div>
+        <button id="btn-hud-help">❓</button>
+      </div>
+
+      <div id="hud-instructions" style="display:none">
+        <div id="hud-instr-panel">
+          <button id="btn-hud-help-close">✕ Close</button>
+          <h3>Controls</h3>
+          <div class="instr-cols">
+            <div class="instr-col"><strong>⌨️ Keyboard</strong><ul><li>WASD / Arrows — Move</li><li>E or Space — Act</li><li>Shift — Sprint</li></ul></div>
+            <div class="instr-col"><strong>📱 Mobile</strong><ul><li>Joystick — Move</li><li>ACT — Act</li><li>RUN — Sprint</li></ul></div>
+          </div>
+          <h3>Missions</h3>
+          <ul>
+            <li>🔪 Kill — Get close, press Act</li>
+            <li>🪢 Kidnap — Grab with Act, follow arrow to drop-off</li>
+            <li>🛡️ Survive — Stay alive</li>
+            <li>⚠️ No "Simon says" = TRAP (-200 pts)</li>
+          </ul>
+          <h3>Key Rules</h3>
+          <ul>
+            <li>🤝 Secret ally — betray for +400 bonus</li>
+            <li>💰 Bounty on top player — kill for +200</li>
+            <li>🚔 Cop chases bounty player — 30s arrest if caught</li>
+            <li>Mash Act to escape a kidnap</li>
+          </ul>
+        </div>
       </div>
       <div id="health-bar-wrap">
         <div id="health-bar"><div id="health-fill"></div></div>
@@ -41,6 +67,13 @@ export class HUD {
     `;
     container.appendChild(this.el);
     this._gameTimerInterval = null;
+
+    this.el.querySelector('#btn-hud-help').addEventListener('click', () => {
+      this.el.querySelector('#hud-instructions').style.display = 'flex';
+    });
+    this.el.querySelector('#btn-hud-help-close').addEventListener('click', () => {
+      this.el.querySelector('#hud-instructions').style.display = 'none';
+    });
   }
 
   // ── Game timer ───────────────────────────────────

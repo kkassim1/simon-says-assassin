@@ -80,7 +80,8 @@ export class Game {
     sun.shadow.camera.bottom = -220;
     this.scene.add(sun);
 
-    buildCity(this.scene);
+    const buildingBoxes = buildCity(this.scene);
+    setBuildingBoxes(buildingBoxes);
 
     const me = this._meInfo;
     this.player = new PlayerController(
@@ -176,6 +177,8 @@ export class Game {
     // ── Player dying (will respawn in Xs) ──────────
     net.on('player:dying', (data) => {
       if (data.playerId === this.myId) {
+        this.kidnappingTarget = null;
+        this.hud.setActionHint('');
         this.hud.showRespawnCountdown(data.respawnIn);
         this._startRespawnCountdown(data.respawnIn);
       } else {
@@ -194,6 +197,7 @@ export class Game {
         this.player.setAlive(true);
         this.player.setCaptured(false);
         this.isBeingKidnapped = false;
+        this.kidnappingTarget = null;
         this.myHp = this.myMaxHp;
         this.hud.setHealth(this.myHp, this.myMaxHp);
         this.hud.showEscapePrompt(false);
@@ -303,6 +307,11 @@ export class Game {
         this.isBeingKidnapped = false;
         this.player.setCaptured(false);
         this.hud.showEscapePrompt(false);
+        // I died while kidnapping someone — drop them
+        if (this.kidnappingTarget) {
+          this.kidnappingTarget = null;
+          this.hud.setActionHint('');
+        }
       }
       if (this.kidnappingTarget === data.targetId) {
         this.kidnappingTarget = null;
@@ -321,6 +330,11 @@ export class Game {
         this.isBeingKidnapped = false;
         this.player.setCaptured(false);
         this.hud.showEscapePrompt(false);
+        if (this.kidnappingTarget) { this.kidnappingTarget = null; this.hud.setActionHint(''); }
+      }
+      if (this.kidnappingTarget === data.targetId) {
+        this.kidnappingTarget = null;
+        this.hud.setActionHint('');
       }
       this.scores = data.scores || this.scores;
       this.hud.setScore(this.scores[this.myId] || 0);

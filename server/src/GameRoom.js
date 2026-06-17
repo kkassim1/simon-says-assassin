@@ -12,6 +12,8 @@ const COP_SPEED       = 12;    // faster than walk (10), slower than sprint (17)
 const COP_CATCH_RANGE = 3.5;
 const ARREST_DURATION = 30;    // seconds player is frozen
 const COP_TICK_MS     = 150;   // ms between cop position updates
+const ACTION_RANGE    = 7;     // generous server-side range (client uses 3.5; extra for latency)
+const MIN_ESCAPE_ATTEMPTS = 3; // must mash at least this many times before escape is possible
 
 const PLAYER_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
 const PLAYER_NAMES  = ['Ghost', 'Viper', 'Raven', 'Cobra', 'Shade', 'Frost', 'Dagger', 'Storm'];
@@ -44,6 +46,7 @@ export class GameRoom {
     this.activeCops      = new Map();  // copId -> { id, x, z, targetId }
     this.arrestedPlayers = {};          // playerId -> true while arrested
     this._copInterval    = null;
+    this.escapeAttempts  = {};          // victimId -> attempt count
   }
 
   // ── Lobby ────────────────────────────────────────
@@ -67,11 +70,36 @@ export class GameRoom {
   }
 
   removePlayer(socketId) {
+    if (this.state === 'playing') {
+      // Free anyone this player was kidnapping
+      for (const [victimId, kidnapperId] of Object.entries(this.capturedStatus)) {
+        if (kidnapperId === socketId) {
+          this.capturedStatus[victimId] = null;
+          this.io.to(this.roomCode).emit('game:event', {
+            type: 'escaped', targetId: victimId,
+            targetName: this.players.get(victimId)?.name,
+            message: `${this.players.get(victimId)?.name} broke free (kidnapper left)!`,
+          });
+        }
+      }
+      // Reassign tasks that were targeting this player
+      for (const [pid, task] of Object.entries(this.tasks)) {
+        if (task.targetId === socketId && this.aliveStatus[pid]) {
+          setTimeout(() => this._assignNewTask(pid), 400);
+        }
+      }
+    }
+
     this.players.delete(socketId);
     delete this.scores[socketId];
     delete this.tasks[socketId];
+    delete this.capturedStatus[socketId];
+    delete this.aliveStatus[socketId];
+    delete this.playerHp[socketId];
+    delete this.wantedLevel[socketId];
+
     if (this.players.size === 0) { this.cleanup(); return; }
-    this.broadcastLobbyState();
+    if (this.state !== 'playing') this.broadcastLobbyState();
   }
 
   broadcastLobbyState() {
@@ -181,9 +209,17 @@ export class GameRoom {
     if (this.state !== 'playing') return;
     if (!this.aliveStatus[attackerId] || !this.aliveStatus[targetId]) return;
 
+    const attacker = this.players.get(attackerId);
+    const tgt      = this.players.get(targetId);
+    if (!attacker || !tgt) return;
+    if (!attacker.isBot) {
+      const dx = attacker.x - tgt.x, dz = attacker.z - tgt.z;
+      if (Math.sqrt(dx * dx + dz * dz) > ACTION_RANGE) return;
+    }
+
     const task        = this.tasks[attackerId];
-    const attackerName = this.players.get(attackerId)?.name;
-    const targetName   = this.players.get(targetId)?.name;
+    const attackerName = attacker.name;
+    const targetName   = tgt.name;
 
     if (task && task.type === 'kill' && task.targetId === targetId) {
       if (task.trap) {
@@ -246,9 +282,19 @@ export class GameRoom {
     if (!this.aliveStatus[attackerId] || !this.aliveStatus[targetId]) return;
     if (this.capturedStatus[targetId]) return;
 
+    const attacker = this.players.get(attackerId);
+    const tgt      = this.players.get(targetId);
+    if (!attacker || !tgt) return;
+    if (!attacker.isBot) {
+      const dx = attacker.x - tgt.x, dz = attacker.z - tgt.z;
+      if (Math.sqrt(dx * dx + dz * dz) > ACTION_RANGE) return;
+    }
+
+    this.escapeAttempts[targetId] = 0;
+
     const task        = this.tasks[attackerId];
-    const attackerName = this.players.get(attackerId)?.name;
-    const targetName   = this.players.get(targetId)?.name;
+    const attackerName = attacker.name;
+    const targetName   = tgt.name;
 
     if (!task || task.type !== 'kidnap' || task.targetId !== targetId) {
       this.scores[attackerId] = Math.max(0, (this.scores[attackerId] || 0) - 100);
@@ -299,13 +345,16 @@ export class GameRoom {
 
   breakFree(playerId) {
     if (!this.capturedStatus[playerId]) return;
-    if (Math.random() < 0.5) {
+    this.escapeAttempts[playerId] = (this.escapeAttempts[playerId] || 0) + 1;
+    const attempts = this.escapeAttempts[playerId];
+    if (attempts < MIN_ESCAPE_ATTEMPTS || Math.random() < 0.7) {
       this.io.to(this.roomCode).emit('game:event', {
         type: 'escape_attempt', targetId: playerId,
-        message: `${this.players.get(playerId)?.name} is struggling!`,
+        message: `${this.players.get(playerId)?.name} is struggling! (${attempts}/${MIN_ESCAPE_ATTEMPTS} min)`,
       });
       return;
     }
+    delete this.escapeAttempts[playerId];
     this.capturedStatus[playerId] = null;
     this.io.to(this.roomCode).emit('game:event', {
       type: 'escaped', targetId: playerId,
@@ -319,6 +368,19 @@ export class GameRoom {
   _handleDeath(targetId) {
     this.aliveStatus[targetId]    = false;
     this.capturedStatus[targetId] = null;
+    delete this.escapeAttempts[targetId];
+
+    // If this player was kidnapping someone, free the victim
+    for (const [victimId, kidnapperId] of Object.entries(this.capturedStatus)) {
+      if (kidnapperId === targetId) {
+        this.capturedStatus[victimId] = null;
+        this.io.to(this.roomCode).emit('game:event', {
+          type: 'escaped', targetId: victimId,
+          targetName: this.players.get(victimId)?.name,
+          message: `${this.players.get(victimId)?.name} broke free (kidnapper died)!`,
+        });
+      }
+    }
 
     // Reassign tasks for anyone who had this player as their target
     for (const [pid, task] of Object.entries(this.tasks)) {

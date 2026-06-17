@@ -24,6 +24,7 @@ const CELL = 20;
 
 export function buildCity(scene) {
   const group = new THREE.Group();
+  const boxes = [];   // AABB collision boxes for all building cells
 
   const rows = CITY_GRID.length;
   const cols = CITY_GRID[0].length;
@@ -60,6 +61,7 @@ export function buildCity(scene) {
         addDashLines(group, wx, wz, row, col, CITY_GRID, CELL, markMat);
       } else if (cell === 1) {
         addBuildingCluster(group, wx, wz, CELL);
+        boxes.push({ minX: wx - CELL / 2, maxX: wx + CELL / 2, minZ: wz - CELL / 2, maxZ: wz + CELL / 2 });
         const swGeo = new THREE.PlaneGeometry(CELL, CELL);
         const sw = new THREE.Mesh(swGeo, sidewalkMat);
         sw.rotation.x = -Math.PI / 2;
@@ -76,7 +78,7 @@ export function buildCity(scene) {
   addStreetLights(group, rows, cols, CITY_GRID, offsetX, offsetZ, CELL);
 
   scene.add(group);
-  return group;
+  return boxes;
 }
 
 function addBuildingCluster(group, cx, cz, cellSize) {
