@@ -112,4 +112,12 @@ io.on('connection', (socket) => {
 
 httpServer.listen(PORT, () => {
   console.log(`Simon Says Assassin server running on port ${PORT}`);
+
+  // Keep Render free tier awake by self-pinging every 10 minutes
+  const SELF_URL = process.env.RENDER_EXTERNAL_URL;
+  if (SELF_URL) {
+    setInterval(() => {
+      fetch(`${SELF_URL}/health`).catch(() => {});
+    }, 10 * 60 * 1000);
+  }
 });
