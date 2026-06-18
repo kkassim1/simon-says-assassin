@@ -22,10 +22,10 @@ const PLAYER_COLORS = [
 const PLAYER_NAMES  = ['Ghost', 'Viper', 'Raven', 'Cobra', 'Shade', 'Frost', 'Dagger', 'Storm'];
 
 const SPAWN_POINTS = [
-  { x:  22, z:  22 },
-  { x: -22, z:  22 },
-  { x:  22, z: -22 },
-  { x: -22, z: -22 },
+  { x:  10, z:  30 },  // road col x=10, clear of building block [20,40]x[20,40]
+  { x: -22, z:  22 },  // park cell — no collision box
+  { x:  10, z: -30 },  // road col x=10, clear of building block [20,40]x[-40,-20]
+  { x: -50, z: -30 },  // road col x=-50, clear of building block [-40,-20]x[-40,-20]
   { x:  65, z:   0 },
   { x: -65, z:   0 },
   { x:   0, z:  65 },

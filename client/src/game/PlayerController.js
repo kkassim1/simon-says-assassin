@@ -84,8 +84,10 @@ export class PlayerController {
       const cx = Math.max(-bound, Math.min(bound, nx));
       const cz = Math.max(-bound, Math.min(bound, nz));
 
-      if (!_collidesWithBuilding(cx, this.position.z)) this.position.x = cx;
-      if (!_collidesWithBuilding(this.position.x, cz)) this.position.z = cz;
+      // If already inside a building, allow movement so the player can escape
+      const stuck = _collidesWithBuilding(this.position.x, this.position.z);
+      if (stuck || !_collidesWithBuilding(cx, this.position.z)) this.position.x = cx;
+      if (stuck || !_collidesWithBuilding(this.position.x, cz)) this.position.z = cz;
     }
 
     this.group.position.copy(this.position);
