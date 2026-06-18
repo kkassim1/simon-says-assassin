@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildCity } from './CityMap.js';
 import { PlayerController, setBuildingBoxes } from './PlayerController.js';
 import { RemotePlayer } from './RemotePlayer.js';
-import { createNPCs } from './NPC.js';
+import { createNPCs, setNPCBuildingBoxes } from './NPC.js';
 import { HUD } from '../ui/HUD.js';
 import { SoundManager } from './SoundManager.js';
 
@@ -82,6 +82,7 @@ export class Game {
 
     const buildingBoxes = buildCity(this.scene);
     setBuildingBoxes(buildingBoxes);
+    setNPCBuildingBoxes(buildingBoxes);
 
     const me = this._meInfo;
     this.player = new PlayerController(
@@ -104,7 +105,8 @@ export class Game {
     this.hud = new HUD(this.container);
     this.hud.show();
 
-    window.addEventListener('resize', this._onResize.bind(this));
+    this._boundOnResize = this._onResize.bind(this);
+    window.addEventListener('resize', this._boundOnResize);
     this._setupNetworkListeners();
     this._loop();
   }
@@ -218,7 +220,9 @@ export class Game {
 
     net.on('game:end', (data) => {
       this.gameActive = false;
-      this.hud.showGameEnd(data.leaderboard, this.myId);
+      this.hud.showGameEnd(data.leaderboard, this.myId, () => {
+        this.network.resetRoom();
+      });
     });
 
     net.on('player:move', (data) => {
@@ -606,11 +610,17 @@ export class Game {
 
   destroy() {
     cancelAnimationFrame(this._animId);
+    window.removeEventListener('resize', this._boundOnResize);
     if (this._respawnTimer) clearInterval(this._respawnTimer);
     if (this._arrestTimer) clearInterval(this._arrestTimer);
     for (const cop of this.cops.values()) cop.dispose();
     this.cops.clear();
     this.renderer.dispose();
-    this.container.removeChild(this.renderer.domElement);
+    if (this.renderer.domElement.parentNode === this.container) {
+      this.container.removeChild(this.renderer.domElement);
+    }
+    if (this.hud?.el?.parentNode === this.container) {
+      this.container.removeChild(this.hud.el);
+    }
   }
 }

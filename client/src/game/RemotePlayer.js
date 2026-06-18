@@ -64,9 +64,10 @@ export class RemotePlayer {
     this.targetRot = rot;
   }
 
-  update() {
-    this.group.position.lerp(this.targetPos, 0.2);
-    this.group.rotation.y += _angleDiff(this.targetRot, this.group.rotation.y) * 0.2;
+  update(delta) {
+    const t = Math.min(1, delta * 12);
+    this.group.position.lerp(this.targetPos, t);
+    this.group.rotation.y += _angleDiff(this.targetRot, this.group.rotation.y) * t;
   }
 
   setAlive(alive) {

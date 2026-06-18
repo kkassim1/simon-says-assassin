@@ -34,7 +34,7 @@ io.on('connection', (socket) => {
 
   socket.on('room:create', ({ playerName }) => {
     const code = generateRoomCode();
-    const room = new GameRoom(io, code);
+    const room = new GameRoom(io, code, () => rooms.delete(code));
     rooms.set(code, room);
     currentRoom = code;
     const ok = room.addPlayer(socket, playerName);
@@ -95,17 +95,17 @@ io.on('connection', (socket) => {
     rooms.get(currentRoom)?.breakFree(socket.id);
   });
 
+  socket.on('room:reset', () => {
+    if (!currentRoom) return;
+    rooms.get(currentRoom)?.resetToLobby();
+  });
+
   socket.on('disconnect', () => {
     console.log(`[-] ${socket.id} disconnected`);
     if (currentRoom) {
       const room = rooms.get(currentRoom);
-      if (room) {
-        room.removePlayer(socket.id);
-        if (room.players.size === 0) {
-          rooms.delete(currentRoom);
-          console.log(`[room] deleted ${currentRoom}`);
-        }
-      }
+      if (room) room.removePlayer(socket.id);
+      // onDestroy callback handles rooms.delete when player count hits 0
     }
   });
 });

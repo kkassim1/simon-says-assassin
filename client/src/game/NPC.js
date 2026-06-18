@@ -3,6 +3,20 @@ import * as THREE from 'three';
 const NPC_COLORS = [0x95a5a6, 0xbdc3c7, 0x7f8c8d, 0xecf0f1];
 const NPC_NAMES = ['Civilian', 'Passerby', 'Bystander', 'Tourist'];
 const NPC_SPEED = 2.5;
+const NPC_RADIUS = 0.5;
+
+let _buildingBoxes = [];
+export function setNPCBuildingBoxes(boxes) { _buildingBoxes = boxes; }
+
+function _collidesWithBuilding(x, z) {
+  for (const box of _buildingBoxes) {
+    if (
+      x > box.minX + NPC_RADIUS && x < box.maxX - NPC_RADIUS &&
+      z > box.minZ + NPC_RADIUS && z < box.maxZ - NPC_RADIUS
+    ) return true;
+  }
+  return false;
+}
 
 export class NPC {
   constructor(scene, id) {
@@ -70,11 +84,20 @@ export class NPC {
     }
 
     dir.normalize();
-    const step = NPC_SPEED * delta;
-    this.position.addScaledVector(dir, Math.min(step, dist));
+    const step = Math.min(NPC_SPEED * delta, dist);
+    const nx = Math.max(-155, Math.min(155, this.position.x + dir.x * step));
+    const nz = Math.max(-155, Math.min(155, this.position.z + dir.z * step));
 
-    this.position.x = Math.max(-155, Math.min(155, this.position.x));
-    this.position.z = Math.max(-155, Math.min(155, this.position.z));
+    if (_collidesWithBuilding(nx, nz)) {
+      // Hit a building — wait briefly and pick a new destination
+      this._waiting = true;
+      this._waitTime = 0.5 + Math.random() * 1.5;
+      this.target = this._newTarget();
+      return;
+    }
+
+    this.position.x = nx;
+    this.position.z = nz;
 
     this.group.position.copy(this.position);
     this.group.rotation.y = Math.atan2(dir.x, dir.z);

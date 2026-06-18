@@ -26,11 +26,12 @@ const SPAWN_POINTS = [
 ];
 
 export class GameRoom {
-  constructor(io, roomCode) {
-    this.io       = io;
-    this.roomCode = roomCode;
-    this.players  = new Map();
-    this.state    = 'lobby';
+  constructor(io, roomCode, onDestroy) {
+    this.io        = io;
+    this.roomCode  = roomCode;
+    this._onDestroy = onDestroy || null;
+    this.players   = new Map();
+    this.state     = 'lobby';
 
     this.tasks          = {};
     this.scores         = {};
@@ -42,6 +43,7 @@ export class GameRoom {
     this.allies         = {};
 
     this.gameTimer = null;
+    this._endCleanupTimer = null;
 
     this.activeCops      = new Map();  // copId -> { id, x, z, targetId }
     this.arrestedPlayers = {};          // playerId -> true while arrested
@@ -101,7 +103,7 @@ export class GameRoom {
     delete this.playerHp[socketId];
     delete this.wantedLevel[socketId];
 
-    if (this.players.size === 0) { this.cleanup(); return; }
+    if (this.players.size === 0) { this.cleanup(); return; }  // triggers onDestroy
     if (this.state !== 'playing') this.broadcastLobbyState();
   }
 
@@ -500,7 +502,7 @@ export class GameRoom {
 
   _updateBounty() {
     const prevTarget = this.bountyTarget;
-    let topId = null, topScore = -1, secondScore = -1;
+    let topId = null, topScore = -1, secondScore = 0;
     for (const [id, score] of Object.entries(this.scores)) {
       if (score > topScore)         { secondScore = topScore; topScore = score; topId = id; }
       else if (score > secondScore) { secondScore = score; }
@@ -689,11 +691,47 @@ export class GameRoom {
       .sort((a, b) => b.score - a.score);
 
     this.io.to(this.roomCode).emit('game:end', { leaderboard: sorted, winner: sorted[0] });
+
+    // Auto-destroy room after 2 minutes if nobody resets it
+    this._endCleanupTimer = setTimeout(() => this.cleanup(), 120_000);
+  }
+
+  resetToLobby() {
+    if (this.state !== 'ended') return;
+    if (this._endCleanupTimer) { clearTimeout(this._endCleanupTimer); this._endCleanupTimer = null; }
+
+    clearTimeout(this.gameTimer);
+    this._despawnAllCops();
+    if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
+
+    // Remove bots
+    for (const [id, p] of this.players) {
+      if (p.isBot) { this.players.delete(id); }
+    }
+
+    // Reset all game state
+    this.tasks          = {};
+    this.scores         = {};
+    this.aliveStatus    = {};
+    this.capturedStatus = {};
+    this.playerHp       = {};
+    this.wantedLevel    = {};
+    this.bountyTarget   = null;
+    this.allies         = {};
+    this.arrestedPlayers = {};
+    this.escapeAttempts  = {};
+    for (const id of this.players.keys()) this.scores[id] = 0;
+
+    this.state = 'lobby';
+    this.io.to(this.roomCode).emit('game:reset');
+    this.broadcastLobbyState();
   }
 
   cleanup() {
     clearTimeout(this.gameTimer);
+    if (this._endCleanupTimer) { clearTimeout(this._endCleanupTimer); this._endCleanupTimer = null; }
     this._despawnAllCops();
     if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
+    this._onDestroy?.();
   }
 }

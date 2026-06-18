@@ -222,7 +222,7 @@ export class HUD {
 
   // ── Game end ─────────────────────────────────────
 
-  showGameEnd(leaderboard, myId) {
+  showGameEnd(leaderboard, myId, onPlayAgain) {
     if (this._gameTimerInterval) clearInterval(this._gameTimerInterval);
     const winner   = leaderboard[0];
     const isWinner = winner?.id === myId;
@@ -242,7 +242,15 @@ export class HUD {
       <button id="btn-play-again">Play Again</button>
     `;
     document.body.appendChild(overlay);
-    overlay.querySelector('#btn-play-again').addEventListener('click', () => window.location.reload());
+    this._endOverlay = overlay;
+    overlay.querySelector('#btn-play-again').addEventListener('click', () => onPlayAgain?.());
+  }
+
+  removeGameEnd() {
+    if (this._endOverlay) {
+      this._endOverlay.remove();
+      this._endOverlay = null;
+    }
   }
 
   show() { this.el.style.display = 'block'; }

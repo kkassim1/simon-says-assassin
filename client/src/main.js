@@ -43,10 +43,14 @@ async function main() {
     lobby.hide();
     launchGame(latestPlayers, myId, appEl);
   });
+
+  // Server confirmed reset — all clients return to lobby
+  network.on('game:reset', () => {
+    returnToLobby();
+  });
 }
 
 function launchGame(players, myId, container) {
-  // Input
   if (isMobile) {
     const vi = new VirtualInput();
     inputHandler = vi;
@@ -58,6 +62,23 @@ function launchGame(players, myId, container) {
 
   game = new Game(network, myId, players, container);
   game.init(inputHandler);
+}
+
+function returnToLobby() {
+  if (game) {
+    game.hud?.removeGameEnd();
+    game.destroy();
+    game = null;
+  }
+  if (touchControls) {
+    touchControls.destroy();
+    touchControls = null;
+  }
+  if (inputHandler) {
+    inputHandler.destroy?.();
+    inputHandler = null;
+  }
+  lobby.show();
 }
 
 main().catch(console.error);

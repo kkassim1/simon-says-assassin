@@ -59,6 +59,10 @@ export class Network {
     this.socket.emit('action:break_free');
   }
 
+  resetRoom() {
+    this.socket.emit('room:reset');
+  }
+
   get id() {
     return this.socket?.id;
   }
