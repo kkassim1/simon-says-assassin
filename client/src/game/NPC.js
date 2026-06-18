@@ -38,6 +38,7 @@ export class NPC {
     this._idleTime = 0;
     this._waitTime = 1 + Math.random() * 3;
     this._waiting = false;
+    this._dir = new THREE.Vector3();
   }
 
   _build() {
@@ -74,7 +75,7 @@ export class NPC {
       return;
     }
 
-    const dir = new THREE.Vector3().subVectors(this.target, this.position);
+    const dir = this._dir.subVectors(this.target, this.position);
     const dist = dir.length();
 
     if (dist < 0.5) {

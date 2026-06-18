@@ -268,47 +268,63 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 }
 
 #joystick-zone {
-  position: absolute; bottom: 30px; left: 20px;
-  width: 160px; height: 160px;
+  position: absolute;
+  /* Safe-area aware positioning — keeps controls clear of home bar on iPhone */
+  bottom: calc(max(28px, env(safe-area-inset-bottom, 0px)) + 10px);
+  left:   calc(max(16px, env(safe-area-inset-left,   0px)) + 4px);
+  width: clamp(150px, 38vw, 200px);
+  height: clamp(150px, 38vw, 200px);
   pointer-events: all;
+  touch-action: none;
 }
 
 #joystick-base {
   position: absolute; bottom: 0; left: 0;
-  width: 90px; height: 90px;
+  width: clamp(76px, 18vw, 100px);
+  height: clamp(76px, 18vw, 100px);
   border-radius: 50%;
   background: rgba(255,255,255,0.1);
-  border: 2px solid rgba(255,255,255,0.25);
+  border: 2px solid rgba(255,255,255,0.3);
   display: flex; align-items: center; justify-content: center;
-  opacity: 0.4;
+  opacity: 0.45;
 }
 
 #joystick-knob {
-  width: 36px; height: 36px; border-radius: 50%;
-  background: rgba(255,255,255,0.5);
-  border: 2px solid rgba(255,255,255,0.8);
-  transition: transform 0.05s;
+  width: clamp(30px, 8vw, 40px);
+  height: clamp(30px, 8vw, 40px);
+  border-radius: 50%;
+  background: rgba(255,255,255,0.55);
+  border: 2px solid rgba(255,255,255,0.85);
+  pointer-events: none;
+  transition: transform 0.04s;
 }
 
 #action-buttons {
-  position: absolute; bottom: 30px; right: 20px;
+  position: absolute;
+  bottom: calc(max(28px, env(safe-area-inset-bottom, 0px)) + 10px);
+  right:  calc(max(16px, env(safe-area-inset-right,  0px)) + 4px);
   display: flex; flex-direction: column; gap: 12px;
   pointer-events: all;
+  touch-action: none;
 }
 
 .action-btn {
-  width: 70px; height: 70px; border-radius: 50%;
+  width:  clamp(64px, 16vw, 80px);
+  height: clamp(64px, 16vw, 80px);
+  border-radius: 50%;
   border: 2px solid rgba(255,255,255,0.3);
-  font-size: 1.4rem; cursor: pointer;
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  cursor: pointer;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px; color: #fff;
-  background: rgba(231,76,60,0.5);
+  background: rgba(231,76,60,0.55);
   backdrop-filter: blur(4px);
   -webkit-tap-highlight-color: transparent;
+  touch-action: none;
 }
 .action-btn span { font-size: 0.55rem; font-weight: 700; letter-spacing: 1px; }
-.action-btn.sprint-btn { background: rgba(52,152,219,0.5); }
-.action-btn:active { transform: scale(0.9); }
+.action-btn.sprint-btn { background: rgba(52,152,219,0.55); }
+.action-btn:active { transform: scale(0.88); }
 
 /* ── ARREST OVERLAY ──────────────────────────── */
 #arrest-overlay {
@@ -468,10 +484,34 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 
 /* ── RESPONSIVE ───────────────────────────────── */
 @media (max-width: 600px) {
-  #hud-top { font-size: 0.8rem; padding: 6px 12px; gap: 12px; }
-  #task-box { bottom: 160px; }
-  #action-hint { bottom: 130px; }
-  #simon-banner { font-size: 1rem; padding: 10px 18px; }
-  #target-arrow { bottom: 210px; }
-  #health-bar-wrap { top: 54px; }
+  #hud-top { font-size: 0.78rem; padding: 5px 10px; gap: 10px; }
+  #task-box { bottom: 180px; max-width: 60vw; }
+  #action-hint { bottom: 150px; }
+  #simon-banner { font-size: 0.95rem; padding: 8px 14px; }
+  #target-arrow { bottom: 230px; }
+  #health-bar-wrap { top: 50px; }
+  #ally-info { font-size: 0.75rem; padding: 4px 8px; }
+  #event-feed { max-width: 180px; font-size: 0.76rem; }
+}
+
+/* Landscape on a phone — controls stay small, HUD moves up */
+@media (orientation: landscape) and (max-height: 500px) {
+  #task-box { bottom: 130px; }
+  #action-hint { bottom: 100px; }
+  #target-arrow { bottom: 170px; }
+  #joystick-zone {
+    width: clamp(110px, 28vh, 160px);
+    height: clamp(110px, 28vh, 160px);
+    bottom: 8px;
+  }
+  #joystick-base {
+    width: clamp(58px, 14vh, 80px);
+    height: clamp(58px, 14vh, 80px);
+  }
+  #action-buttons { bottom: 8px; gap: 8px; }
+  .action-btn {
+    width:  clamp(52px, 13vh, 68px);
+    height: clamp(52px, 13vh, 68px);
+    font-size: 1rem;
+  }
 }

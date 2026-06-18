@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildCharacter } from './Character.js';
+import { buildCharacter, animateCharacter, PUNCH_DURATION } from './Character.js';
 
 export class RemotePlayer {
   constructor(scene, id, name, color, hatIdx = 0) {
@@ -13,15 +13,24 @@ export class RemotePlayer {
 
     this.targetPos = new THREE.Vector3();
     this.targetRot = 0;
+    this.isCaptured = false;
+    this.isDragging = false;
+
+    this._animTime   = 0;
+    this._punchTimer = 0;
+    this._prevPos    = new THREE.Vector3();
 
     this.group   = new THREE.Group();
     this.bodyMat = null;
+    this._limbs  = null;
     this._build();
     scene.add(this.group);
   }
 
   _build() {
-    this.bodyMat = buildCharacter(this.group, this.color, this.hatIdx);
+    const built = buildCharacter(this.group, this.color, this.hatIdx);
+    this.bodyMat = built.jacketMat;
+    this._limbs  = built;
 
     // Name label above hat
     this.label = _makeLabel(this.name, this.color);
@@ -54,9 +63,14 @@ export class RemotePlayer {
   }
 
   flashAttack() {
+    this._punchTimer = PUNCH_DURATION;
     const orig = this.bodyMat.color.clone();
     this.bodyMat.color.setHex(0xffcc00);
     setTimeout(() => this.bodyMat.color.copy(orig), 220);
+  }
+
+  setCaptured(captured) {
+    this.isCaptured = captured;
   }
 
   applyServerState(x, y, z, rot) {
@@ -66,8 +80,26 @@ export class RemotePlayer {
 
   update(delta) {
     const t = Math.min(1, delta * 12);
+    this._prevPos.copy(this.group.position);
     this.group.position.lerp(this.targetPos, t);
     this.group.rotation.y += _angleDiff(this.targetRot, this.group.rotation.y) * t;
+
+    if (this._limbs) {
+      this._animTime += delta;
+      if (this._punchTimer > 0) this._punchTimer -= delta;
+
+      const moved = this.group.position.distanceTo(this._prevPos) > 0.002;
+
+      let state = 'idle';
+      if (this.isCaptured) state = 'captured';
+      else if (this.isDragging) state = 'drag';
+      else if (moved) state = 'walk';
+
+      const punch = this._punchTimer > 0
+        ? 1 - this._punchTimer / PUNCH_DURATION
+        : 0;
+      animateCharacter(this._limbs, this._animTime, state, punch);
+    }
   }
 
   setAlive(alive) {

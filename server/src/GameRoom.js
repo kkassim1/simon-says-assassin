@@ -5,7 +5,7 @@ const LOBBY_COUNTDOWN = 5;
 const GAME_DURATION   = 600;   // 10 minutes
 const RESPAWN_DELAY   = 15;    // seconds before respawn
 const RESPAWN_PENALTY = 50;    // points deducted on death
-const MAX_PLAYERS     = 4;
+const MAX_PLAYERS     = 8;
 const MAX_HP          = 3;
 const WITNESS_RANGE   = 30;
 const COP_SPEED       = 12;    // faster than walk (10), slower than sprint (17)
@@ -15,14 +15,21 @@ const COP_TICK_MS     = 150;   // ms between cop position updates
 const ACTION_RANGE    = 7;     // generous server-side range (client uses 3.5; extra for latency)
 const MIN_ESCAPE_ATTEMPTS = 3; // must mash at least this many times before escape is possible
 
-const PLAYER_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
+const PLAYER_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
+  '#9b59b6', '#1abc9c', '#e91e63', '#ff9800',
+];
 const PLAYER_NAMES  = ['Ghost', 'Viper', 'Raven', 'Cobra', 'Shade', 'Frost', 'Dagger', 'Storm'];
 
 const SPAWN_POINTS = [
-  { x:  20, z:  20 },
-  { x: -20, z:  20 },
-  { x:  20, z: -20 },
-  { x: -20, z: -20 },
+  { x:  22, z:  22 },
+  { x: -22, z:  22 },
+  { x:  22, z: -22 },
+  { x: -22, z: -22 },
+  { x:  65, z:   0 },
+  { x: -65, z:   0 },
+  { x:   0, z:  65 },
+  { x:   0, z: -65 },
 ];
 
 export class GameRoom {
@@ -80,7 +87,7 @@ export class GameRoom {
           this.capturedStatus[victimId] = null;
           delete this.escapeAttempts[victimId];
           this.io.to(this.roomCode).emit('game:event', {
-            type: 'escaped', targetId: victimId,
+            type: 'escaped', actorId: socketId, targetId: victimId,
             targetName: this.players.get(victimId)?.name,
             message: `${this.players.get(victimId)?.name} broke free (kidnapper left)!`,
           });
@@ -389,10 +396,11 @@ export class GameRoom {
       });
       return;
     }
+    const kidnapperId = this.capturedStatus[playerId]; // save before clearing
     delete this.escapeAttempts[playerId];
     this.capturedStatus[playerId] = null;
     this.io.to(this.roomCode).emit('game:event', {
-      type: 'escaped', targetId: playerId,
+      type: 'escaped', actorId: kidnapperId, targetId: playerId,
       targetName: this.players.get(playerId)?.name,
       message: `${this.players.get(playerId)?.name} broke free!`,
     });
@@ -410,7 +418,7 @@ export class GameRoom {
       if (kidnapperId === targetId) {
         this.capturedStatus[victimId] = null;
         this.io.to(this.roomCode).emit('game:event', {
-          type: 'escaped', targetId: victimId,
+          type: 'escaped', actorId: targetId, targetId: victimId,
           targetName: this.players.get(victimId)?.name,
           message: `${this.players.get(victimId)?.name} broke free (kidnapper died)!`,
         });
@@ -459,13 +467,26 @@ export class GameRoom {
     const player       = this.players.get(playerId);
     const alivePlayers = this.getPlayerList()
       .filter(p => p.id !== playerId && this.aliveStatus[p.id] !== false);
+
+    // Count how many active tasks already target each player (excluding self)
+    const pursuers = {};
+    for (const [pid, task] of Object.entries(this.tasks)) {
+      if (pid !== playerId && task?.targetId) {
+        pursuers[task.targetId] = (pursuers[task.targetId] || 0) + 1;
+      }
+    }
+
+    // Prefer targets who have fewer than 2 people already assigned to them
+    const balanced = alivePlayers.filter(p => (pursuers[p.id] || 0) < 2);
+    const pool = balanced.length > 0 ? balanced : alivePlayers;
+
     if (player?.isBot) {
-      const realAlive = alivePlayers.filter(p => !p.isBot);
-      if (realAlive.length > 0 && Math.random() < 0.75) {
+      const realAlive = pool.filter(p => !p.isBot);
+      if (realAlive.length > 0 && Math.random() < 0.5) {
         return generateTaskForPlayer(player, realAlive);
       }
     }
-    return generateTaskForPlayer(player, alivePlayers);
+    return generateTaskForPlayer(player, pool);
   }
 
   _assignNewTask(playerId) {

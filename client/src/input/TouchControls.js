@@ -1,4 +1,4 @@
-// Virtual joystick + action buttons for mobile
+// Virtual joystick + action buttons for mobile/touch devices
 
 export class TouchControls {
   constructor(virtualInput, container) {
@@ -29,60 +29,65 @@ export class TouchControls {
     `;
     this.container.appendChild(this.el);
 
-    this.base = this.el.querySelector('#joystick-base');
-    this.knob = this.el.querySelector('#joystick-knob');
+    this.zone      = this.el.querySelector('#joystick-zone');
+    this.base      = this.el.querySelector('#joystick-base');
+    this.knob      = this.el.querySelector('#joystick-knob');
     this.btnAction = this.el.querySelector('#btn-action');
     this.btnSprint = this.el.querySelector('#btn-sprint');
   }
 
   _attachEvents() {
-    const zone = this.el.querySelector('#joystick-zone');
-
-    zone.addEventListener('touchstart', (e) => {
+    this.zone.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const t = e.changedTouches[0];
       this._joystickActive = true;
       this._joystickId = t.identifier;
       this._joystickOrigin = { x: t.clientX, y: t.clientY };
+
+      // Snap base under finger — clear 'bottom' so 'top' takes sole effect
+      const rect = this.zone.getBoundingClientRect();
+      const halfBase = this.base.offsetWidth / 2;
+      this.base.style.bottom = 'auto';
+      this.base.style.left   = (t.clientX - rect.left - halfBase) + 'px';
+      this.base.style.top    = (t.clientY - rect.top  - halfBase) + 'px';
       this.base.style.opacity = '1';
-      this.base.style.left = (t.clientX - zone.getBoundingClientRect().left - 45) + 'px';
-      this.base.style.top = (t.clientY - zone.getBoundingClientRect().top - 45) + 'px';
     }, { passive: false });
 
-    zone.addEventListener('touchmove', (e) => {
+    this.zone.addEventListener('touchmove', (e) => {
       e.preventDefault();
       for (const t of e.changedTouches) {
         if (t.identifier !== this._joystickId) continue;
         const dx = t.clientX - this._joystickOrigin.x;
         const dy = t.clientY - this._joystickOrigin.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxDist = 40;
-        const clampedDist = Math.min(dist, maxDist);
+        const maxDist = this.base.offsetWidth * 0.5;
+        const clamp = Math.min(dist, maxDist);
         const angle = Math.atan2(dy, dx);
 
-        const nx = Math.cos(angle) * clampedDist;
-        const ny = Math.sin(angle) * clampedDist;
-
-        this.knob.style.transform = `translate(${nx}px, ${ny}px)`;
-        this.input.moveX = (clampedDist / maxDist) * Math.cos(angle);
-        this.input.moveY = (clampedDist / maxDist) * Math.sin(angle);
+        this.knob.style.transform =
+          `translate(${Math.cos(angle) * clamp}px, ${Math.sin(angle) * clamp}px)`;
+        this.input.moveX = (clamp / maxDist) * Math.cos(angle);
+        this.input.moveY = (clamp / maxDist) * Math.sin(angle);
       }
     }, { passive: false });
 
     const endJoystick = (e) => {
       for (const t of e.changedTouches) {
-        if (t.identifier === this._joystickId) {
-          this._joystickActive = false;
-          this._joystickId = null;
-          this.input.moveX = 0;
-          this.input.moveY = 0;
-          this.knob.style.transform = 'translate(0,0)';
-          this.base.style.opacity = '0.4';
-        }
+        if (t.identifier !== this._joystickId) continue;
+        this._joystickActive = false;
+        this._joystickId = null;
+        this.input.moveX = 0;
+        this.input.moveY = 0;
+        this.knob.style.transform = 'translate(0,0)';
+        this.base.style.opacity = '0.45';
+        // Reset base to default position
+        this.base.style.top    = 'auto';
+        this.base.style.bottom = '0';
+        this.base.style.left   = '0';
       }
     };
-    zone.addEventListener('touchend', endJoystick);
-    zone.addEventListener('touchcancel', endJoystick);
+    this.zone.addEventListener('touchend',    endJoystick, { passive: false });
+    this.zone.addEventListener('touchcancel', endJoystick, { passive: false });
 
     this.btnAction.addEventListener('touchstart', (e) => {
       e.preventDefault();
@@ -90,7 +95,6 @@ export class TouchControls {
     }, { passive: false });
     this.btnAction.addEventListener('touchend', (e) => {
       e.preventDefault();
-      setTimeout(() => { this.input.actionPressed = false; }, 100);
     }, { passive: false });
 
     this.btnSprint.addEventListener('touchstart', (e) => {
@@ -107,6 +111,6 @@ export class TouchControls {
   hide() { this.el.style.display = 'none'; }
 
   destroy() {
-    this.container.removeChild(this.el);
+    if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
   }
 }

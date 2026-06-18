@@ -100,7 +100,7 @@ export class Game {
       this.remotePlayers.set(p.id, rp);
     }
 
-    this.npcs = createNPCs(this.scene, 25);
+    this.npcs = createNPCs(this.scene, 50);
 
     this.hud = new HUD(this.container);
     this.hud.show();
@@ -120,6 +120,7 @@ export class Game {
       this.gameActive    = true;
       this.myTask        = data.tasks[this.myId] || null;
       this.kidnappingTarget  = null;
+      this.player.isDragging = false;
       this.isBeingKidnapped  = false;
       this.myHp          = data.maxHp || 3;
       this.myMaxHp       = data.maxHp || 3;
@@ -146,6 +147,8 @@ export class Game {
           rp.applyServerState(p.x, 0, p.z, 0);
           rp.setAlive(true);
           rp.setHp(this.myMaxHp);
+          rp.setCaptured(false);
+          rp.isDragging = false;
         }
       }
 
@@ -166,12 +169,15 @@ export class Game {
       if (data.playerId === this.myId) {
         this.myTask = data.task;
         this.kidnappingTarget = null;
+        this.player.isDragging = false;
         this.hud.setTask(data.task);
         this.hud.setTargetArrow(null);
         this.sounds.play('task');
         this.hud.addEvent('Simon has a new mission for you!', 'neutral');
       } else {
-        const name = this.remotePlayers.get(data.playerId)?.name || data.playerName;
+        const rp = this.remotePlayers.get(data.playerId);
+        if (rp) rp.isDragging = false;
+        const name = rp?.name || data.playerName;
         this.hud.addEvent(`Simon reassigned ${name}`, 'neutral');
       }
     });
@@ -180,6 +186,7 @@ export class Game {
     net.on('player:dying', (data) => {
       if (data.playerId === this.myId) {
         this.kidnappingTarget = null;
+        this.player.isDragging = false;
         this.hud.setActionHint('');
         this.hud.showRespawnCountdown(data.respawnIn);
         this._startRespawnCountdown(data.respawnIn);
@@ -198,6 +205,7 @@ export class Game {
         this.player.setPosition(data.x, 0, data.z);
         this.player.setAlive(true);
         this.player.setCaptured(false);
+        this.player.isDragging = false;
         this.isBeingKidnapped = false;
         this.kidnappingTarget = null;
         this.myHp = this.myMaxHp;
@@ -235,8 +243,7 @@ export class Game {
       if (rp) rp.applyServerState(data.x, data.y, data.z, data.rot);
     });
 
-    net.on('game:event',   (data) => this._handleGameEvent(data));
-    net.on('game:countdown', (data) => this.hud.showCountdown(data.seconds));
+    net.on('game:event', (data) => this._handleGameEvent(data));
 
     net.on('player:wanted', (data) => {
       this.wantedLevels[data.playerId] = data.level;
@@ -305,22 +312,23 @@ export class Game {
 
     if (type === 'player_killed' || type === 'kidnap_complete') {
       const rp = this.remotePlayers.get(data.targetId);
-      if (rp) rp.setAlive(false);
+      if (rp) { rp.setAlive(false); rp.setCaptured(false); }
       const attackerRp = this.remotePlayers.get(data.actorId);
-      if (attackerRp) attackerRp.flashAttack();
+      if (attackerRp) { attackerRp.flashAttack(); attackerRp.isDragging = false; }
       if (data.targetId === this.myId) {
         this.player.setAlive(false);
         this.isBeingKidnapped = false;
         this.player.setCaptured(false);
         this.hud.showEscapePrompt(false);
-        // I died while kidnapping someone — drop them
         if (this.kidnappingTarget) {
           this.kidnappingTarget = null;
+          this.player.isDragging = false;
           this.hud.setActionHint('');
         }
       }
       if (this.kidnappingTarget === data.targetId) {
         this.kidnappingTarget = null;
+        this.player.isDragging = false;
         this.hud.setActionHint('');
       }
       this.scores = data.scores || this.scores;
@@ -330,18 +338,19 @@ export class Game {
 
     } else if (type === 'betrayal_kill') {
       const rp = this.remotePlayers.get(data.targetId);
-      if (rp) rp.setAlive(false);
+      if (rp) { rp.setAlive(false); rp.setCaptured(false); }
       const betrayerRp = this.remotePlayers.get(data.actorId);
-      if (betrayerRp) betrayerRp.flashAttack();
+      if (betrayerRp) { betrayerRp.flashAttack(); betrayerRp.isDragging = false; }
       if (data.targetId === this.myId) {
         this.player.setAlive(false);
         this.isBeingKidnapped = false;
         this.player.setCaptured(false);
         this.hud.showEscapePrompt(false);
-        if (this.kidnappingTarget) { this.kidnappingTarget = null; this.hud.setActionHint(''); }
+        if (this.kidnappingTarget) { this.kidnappingTarget = null; this.player.isDragging = false; this.hud.setActionHint(''); }
       }
       if (this.kidnappingTarget === data.targetId) {
         this.kidnappingTarget = null;
+        this.player.isDragging = false;
         this.hud.setActionHint('');
       }
       this.scores = data.scores || this.scores;
@@ -381,6 +390,12 @@ export class Game {
     } else if (type === 'kidnap_started') {
       this.hud.addEvent(data.message, 'kidnap');
       this.sounds.play('kidnap');
+      // Mark the victim as captured (animation)
+      const victimRp = this.remotePlayers.get(data.targetId);
+      if (victimRp) victimRp.setCaptured(true);
+      // Mark the kidnapper as dragging (animation)
+      const kidnapperRp = this.remotePlayers.get(data.actorId);
+      if (kidnapperRp) kidnapperRp.isDragging = true;
       if (data.targetId === this.myId) {
         this.isBeingKidnapped = true;
         this.player.setCaptured(true);
@@ -407,6 +422,12 @@ export class Game {
     } else if (type === 'escaped') {
       this.hud.addEvent(data.message, 'escape');
       this.sounds.play('escape');
+      // Clear victim captured state (remote or local)
+      const escapedRp = this.remotePlayers.get(data.targetId);
+      if (escapedRp) escapedRp.setCaptured(false);
+      // Clear kidnapper dragging state (remote or local) — actorId now always present
+      const kidnapperRp = this.remotePlayers.get(data.actorId);
+      if (kidnapperRp) kidnapperRp.isDragging = false;
       if (data.targetId === this.myId) {
         this.isBeingKidnapped = false;
         this.player.setCaptured(false);
@@ -414,6 +435,7 @@ export class Game {
       }
       if (this.kidnappingTarget === data.targetId) {
         this.kidnappingTarget = null;
+        this.player.isDragging = false;
         this.hud.setActionHint('');
       }
     }
@@ -441,6 +463,7 @@ export class Game {
           if (this._distToKidnapLocation() < KIDNAP_DELIVER_RANGE) {
             this.network.sendKidnapComplete();
             this.kidnappingTarget = null;
+            this.player.isDragging = false;
             this.hud.setActionHint('');
           }
         }
@@ -476,16 +499,19 @@ export class Game {
     if (dist > ACTION_RANGE) return;
 
     if (task.type === 'kill') {
+      this.player.triggerPunch();
       this.network.sendKill(task.targetId);
     } else if (task.type === 'kidnap') {
       if (this.kidnappingTarget) {
         if (this._distToKidnapLocation() < KIDNAP_DELIVER_RANGE) {
           this.network.sendKidnapComplete();
           this.kidnappingTarget = null;
+          this.player.isDragging = false;
         }
       } else {
         this.network.sendKidnapStart(task.targetId);
         this.kidnappingTarget = task.targetId;
+        this.player.isDragging = true;
         this.hud.addEvent(`You grabbed ${task.targetName}! Bring them to ${task.locationLabel}`, 'kidnap');
       }
     }

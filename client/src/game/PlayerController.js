@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildCharacter } from './Character.js';
+import { buildCharacter, animateCharacter, PUNCH_DURATION } from './Character.js';
 
 const SPEED            = 10;
 const SPRINT_MULT      = 1.7;
@@ -19,9 +19,14 @@ export class PlayerController {
     this.rotation  = 0;
     this.isAlive   = true;
     this.isCaptured = false;
+    this.isDragging = false;
+
+    this._animTime   = 0;
+    this._punchTimer = 0;
 
     this.group     = new THREE.Group();
     this.bodyMat   = null;
+    this._limbs    = null;
     this._buildMesh();
     scene.add(this.group);
 
@@ -31,7 +36,9 @@ export class PlayerController {
   }
 
   _buildMesh() {
-    this.bodyMat = buildCharacter(this.group, this.color, this.hatIdx);
+    const built = buildCharacter(this.group, this.color, this.hatIdx);
+    this.bodyMat = built.jacketMat;
+    this._limbs  = built;
 
     // Name label above hat
     this.labelSprite = _makeLabel(this.name, this.color);
@@ -54,13 +61,20 @@ export class PlayerController {
   }
 
   update(delta, input, isSprinting) {
-    if (!this.isAlive || this.isCaptured) return;
+    if (!this.isAlive || this.isCaptured) {
+      if (this.isCaptured && this._limbs) {
+        this._animTime += delta;
+        animateCharacter(this._limbs, this._animTime, 'captured');
+      }
+      return;
+    }
 
     const speed = SPEED * (isSprinting ? SPRINT_MULT : 1);
     const dx = input.x;
     const dz = input.y;
+    const moving = Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01;
 
-    if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+    if (moving) {
       this.rotation = Math.atan2(dx, dz);
       this.group.rotation.y = this.rotation;
 
@@ -75,6 +89,25 @@ export class PlayerController {
     }
 
     this.group.position.copy(this.position);
+
+    // Animation
+    if (this._limbs) {
+      this._animTime += delta;
+      if (this._punchTimer > 0) this._punchTimer -= delta;
+
+      let state = 'idle';
+      if (this.isDragging) state = 'drag';
+      else if (moving) state = isSprinting ? 'sprint' : 'walk';
+
+      const punch = this._punchTimer > 0
+        ? 1 - this._punchTimer / PUNCH_DURATION
+        : 0;
+      animateCharacter(this._limbs, this._animTime, state, punch);
+    }
+  }
+
+  triggerPunch() {
+    this._punchTimer = PUNCH_DURATION;
   }
 
   updateCamera() {
