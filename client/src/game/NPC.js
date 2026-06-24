@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 const NPC_SPEED  = 2.5;
+const COP_WALK_SPEED = 3.2;
 const NPC_RADIUS = 0.5;
 
 // Varied skin tones
@@ -27,9 +28,10 @@ function _collidesWithBuilding(x, z) {
 }
 
 export class NPC {
-  constructor(scene, id) {
+  constructor(scene, id, role = 'civilian') {
     this.scene = scene;
     this.id    = id;
+    this.role  = role;
 
     this.position = new THREE.Vector3(
       (Math.random() - 0.5) * 260,
@@ -52,14 +54,16 @@ export class NPC {
 
   _build() {
     const skinColor    = SKIN_TONES[this.id % SKIN_TONES.length];
-    const jacketColor  = JACKET_COLORS[this.id % JACKET_COLORS.length];
-    const pantsColor   = PANTS_COLORS[this.id % PANTS_COLORS.length];
+    const isCop = this.role === 'cop';
+    const jacketColor  = isCop ? 0x1d3557 : JACKET_COLORS[this.id % JACKET_COLORS.length];
+    const pantsColor   = isCop ? 0x111827 : PANTS_COLORS[this.id % PANTS_COLORS.length];
 
     const skinM   = new THREE.MeshLambertMaterial({ color: skinColor });
     const jacketM = new THREE.MeshLambertMaterial({ color: jacketColor });
     const pantsM  = new THREE.MeshLambertMaterial({ color: pantsColor });
     const shoeM   = new THREE.MeshLambertMaterial({ color: 0x111111 });
     const eyeM    = new THREE.MeshBasicMaterial({ color: 0x111111 });
+    const badgeM  = new THREE.MeshBasicMaterial({ color: 0xffd447 });
 
     function mk(geo, mat, x, y, z, shadow = true) {
       const m = new THREE.Mesh(geo, mat);
@@ -83,6 +87,7 @@ export class NPC {
 
     // ── Torso ────────────────────────────────────────────────────
     this.group.add(mk(new THREE.BoxGeometry(0.44, 0.6, 0.24), jacketM, 0, 1.1, 0));
+    if (isCop) this.group.add(mk(new THREE.BoxGeometry(0.12, 0.14, 0.03), badgeM, 0.14, 1.22, 0.135, false));
 
     // ── Arm pivot groups ─────────────────────────────────────────
     const armGeo  = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6);
@@ -118,7 +123,7 @@ export class NPC {
     this.group.add(mk(eyeGeo, eyeM,  0.09, 1.83, 0.21, false));
 
     // ── Simple hat (varies by id) ────────────────────────────────
-    _addHat(this.group, this.id % 3, jacketM);
+    _addHat(this.group, isCop ? 3 : this.id % 3, jacketM);
   }
 
   _newTarget() {
@@ -129,7 +134,7 @@ export class NPC {
     );
   }
 
-  update(delta) {
+  update(delta, traffic = null) {
     if (this._waiting) {
       this._idleTime += delta;
       // idle arm sway
@@ -156,9 +161,18 @@ export class NPC {
     }
 
     dir.normalize();
-    const step = Math.min(NPC_SPEED * delta, dist);
+    const speed = this.role === 'cop' ? COP_WALK_SPEED : NPC_SPEED;
+    const step = Math.min(speed * delta, dist);
     const nx   = Math.max(-155, Math.min(155, this.position.x + dir.x * step));
     const nz   = Math.max(-155, Math.min(155, this.position.z + dir.z * step));
+
+    if (traffic?.shouldPedestrianWait(this.position, dir)) {
+      this._armL.rotation.x =  Math.sin(this._animT + performance.now() * 0.001) * 0.04;
+      this._armR.rotation.x = -this._armL.rotation.x;
+      this._legL.rotation.x = 0;
+      this._legR.rotation.x = 0;
+      return;
+    }
 
     if (_collidesWithBuilding(nx, nz)) {
       this._waiting  = true;
@@ -210,9 +224,17 @@ function _addHat(group, style, jacketMat) {
       mk(new THREE.CylinderGeometry(0.33, 0.33, 0.05, 8), brownM, 0, 2.21, 0);
       mk(new THREE.CylinderGeometry(0.18, 0.22, 0.22, 8), brownM, 0, 2.32, 0);
       break;
+    case 3: // police cap
+      mk(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 8), jacketMat, 0, 2.2, 0);
+      mk(new THREE.CylinderGeometry(0.2, 0.26, 0.16, 8), jacketMat, 0, 2.29, 0);
+      mk(new THREE.BoxGeometry(0.32, 0.04, 0.18), jacketMat, 0, 2.19, 0.22);
+      break;
   }
 }
 
-export function createNPCs(scene, count = 10) {
-  return Array.from({ length: count }, (_, i) => new NPC(scene, i));
+export function createNPCs(scene, count = 10, copCount = 0) {
+  const npcs = [];
+  for (let i = 0; i < count; i++) npcs.push(new NPC(scene, i, 'civilian'));
+  for (let i = 0; i < copCount; i++) npcs.push(new NPC(scene, count + i, 'cop'));
+  return npcs;
 }

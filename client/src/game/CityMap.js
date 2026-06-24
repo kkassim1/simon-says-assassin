@@ -174,11 +174,39 @@ function addRoadMarkings(group, wx, wz, row, col, grid) {
     }
   }
 
+  // White lane edge dashes on straight segments
+  if (isVert) {
+    for (const xOff of [-3.5, 3.5]) {
+      for (let i = -1; i <= 1; i++) {
+        const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 1.8), MAT_MARK_W);
+        dash.rotation.x = -Math.PI / 2;
+        dash.position.set(wx + xOff, 0.03, wz + i * (CELL / 3));
+        group.add(dash);
+      }
+    }
+  }
+  if (isHoriz) {
+    for (const zOff of [-3.5, 3.5]) {
+      for (let i = -1; i <= 1; i++) {
+        const dash = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.14), MAT_MARK_W);
+        dash.rotation.x = -Math.PI / 2;
+        dash.position.set(wx + i * (CELL / 3), 0.03, wz + zOff);
+        group.add(dash);
+      }
+    }
+  }
+
+  // Crosswalks at intersections
+  if (isInter) {
+    if (hasN) addCrosswalk(group, wx, wz - 7, 'vert');
+    if (hasS) addCrosswalk(group, wx, wz + 7, 'vert');
+    if (hasW) addCrosswalk(group, wx - 7, wz, 'horiz');
+    if (hasE) addCrosswalk(group, wx + 7, wz, 'horiz');
+  }
 }
 
 function addCrosswalk(group, cx, cz, dir) {
-  const n = 5;
-  const sw = 0.75, sl = 3.0, gap = 1.0;
+  const n = 5, sw = 0.7, sl = CELL - 2, gap = 1.1;
   for (let i = 0; i < n; i++) {
     const off = (i - (n - 1) / 2) * gap;
     const geo = dir === 'vert'
@@ -188,7 +216,7 @@ function addCrosswalk(group, cx, cz, dir) {
     m.rotation.x = -Math.PI / 2;
     m.position.set(
       dir === 'vert' ? cx : cx + off,
-      0.04,
+      0.05,
       dir === 'vert' ? cz + off : cz
     );
     group.add(m);
@@ -232,7 +260,22 @@ function addBuildingCluster(group, cx, cz, cellSize) {
     group.add(mesh);
 
     addWindows(group, cx + bx, height, cz + bz, bw, bd, styleIdx, palette.win);
-    if (height > 9) addRooftopDetails(group, cx + bx, height, cz + bz, bw, bd, styleIdx);
+    addParapet(group, cx + bx, height, cz + bz, bw, bd);
+
+    if (height > 13) {
+      const sw = bw * 0.65, sd = bd * 0.65;
+      const sh = height * 0.45;
+      const sc = new THREE.Color(colorHex).offsetHSL(0, 0, 0.08);
+      const setback = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, sd), new THREE.MeshLambertMaterial({ color: sc }));
+      setback.position.set(cx + bx, height + sh / 2, cz + bz);
+      setback.castShadow = true;
+      group.add(setback);
+      addWindows(group, cx + bx, height + sh, cz + bz, sw, sd, styleIdx, palette.win);
+      addParapet(group, cx + bx, height + sh, cz + bz, sw, sd);
+      addRooftopDetails(group, cx + bx, height + sh, cz + bz, sw, sd, styleIdx);
+    } else if (height > 9) {
+      addRooftopDetails(group, cx + bx, height, cz + bz, bw, bd, styleIdx);
+    }
 
     const neonChance = styleIdx === 3 ? 0.65 : 0.12;
     if (seededRand(cx + bx * 2.3, cz + bz * 1.7) < neonChance) {
@@ -242,8 +285,9 @@ function addBuildingCluster(group, cx, cz, cellSize) {
 }
 
 function addWindows(group, bx, bh, bz, bw, bd, styleIdx, winStyle) {
-  const floors = Math.min(Math.floor(bh / 2.5), 5);   // max 5 floors
-  const perRow = Math.min(Math.max(1, Math.floor(bw / 2.5)), 3); // max 3 per row
+  const floors = Math.min(Math.floor(bh / 2.5), 6);
+  const perW   = Math.min(Math.max(1, Math.floor(bw / 2.2)), 3);
+  const perD   = Math.min(Math.max(1, Math.floor(bd / 2.2)), 3);
 
   let litMat, darkMat;
   if (winStyle === 'neon') {
@@ -253,21 +297,42 @@ function addWindows(group, bx, bh, bz, bw, bd, styleIdx, winStyle) {
     [litMat, darkMat] = WIN_SETS[winStyle] || WIN_SETS.mixed;
   }
 
-  // Front face only to halve draw calls; MeshBasicMaterial on windows = no lighting calc
   const litBasic  = new THREE.MeshBasicMaterial({ color: litMat.color });
   const darkBasic = new THREE.MeshBasicMaterial({ color: darkMat.color });
 
-  for (let f = 0; f < floors; f++) {
-    const y = 1.5 + f * 2.5;
-    for (let i = 0; i < perRow; i++) {
-      const frac  = (i + 0.5) / perRow;
-      const x     = -bw / 2 + frac * bw;
-      const isLit = seededRand(bx + x * 10 + f * 0.3, bz + i * 0.7) > 0.28;
-      const mat   = isLit ? litBasic : darkBasic;
+  // Front & back faces (along Z)
+  for (let sign = -1; sign <= 1; sign += 2) {
+    const zOff = sign * (bd / 2 + 0.01);
+    const rotY = sign < 0 ? Math.PI : 0;
+    for (let f = 0; f < floors; f++) {
+      const y = 1.5 + f * 2.5;
+      for (let i = 0; i < perW; i++) {
+        const frac  = (i + 0.5) / perW;
+        const x     = -bw / 2 + frac * bw;
+        const isLit = seededRand(bx + x * 10 + f * 0.3 + sign, bz + i * 0.7) > 0.28;
+        const wf    = new THREE.Mesh(GEO_WIN, isLit ? litBasic : darkBasic);
+        wf.rotation.y = rotY;
+        wf.position.set(bx + x, y, bz + zOff);
+        group.add(wf);
+      }
+    }
+  }
 
-      const wf = new THREE.Mesh(GEO_WIN, mat);
-      wf.position.set(bx + x, y, bz + bd / 2 + 0.01);
-      group.add(wf);
+  // Left & right faces (along X)
+  for (let sign = -1; sign <= 1; sign += 2) {
+    const xOff = sign * (bw / 2 + 0.01);
+    const rotY = sign > 0 ? Math.PI / 2 : -Math.PI / 2;
+    for (let f = 0; f < floors; f++) {
+      const y = 1.5 + f * 2.5;
+      for (let i = 0; i < perD; i++) {
+        const frac  = (i + 0.5) / perD;
+        const z     = -bd / 2 + frac * bd;
+        const isLit = seededRand(bz + z * 10 + f * 0.3 + sign * 2, bx + i * 0.7) > 0.28;
+        const wf    = new THREE.Mesh(GEO_WIN, isLit ? litBasic : darkBasic);
+        wf.rotation.y = rotY;
+        wf.position.set(bx + xOff, y, bz + z);
+        group.add(wf);
+      }
     }
   }
 }
@@ -369,6 +434,20 @@ function addNeonSign(group, bx, bh, bz, bw, bd) {
   }
   group.add(sign);
   // No PointLight — emissive material handles the glow at zero GPU cost
+}
+
+function addParapet(group, bx, bh, bz, bw, bd) {
+  const ph = 0.45, pt = 0.22, cy = bh + ph / 2;
+  for (const zOff of [bd / 2 - pt / 2, -(bd / 2 - pt / 2)]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(bw, ph, pt), MAT_GREY_ROOF);
+    p.position.set(bx, cy, bz + zOff);
+    group.add(p);
+  }
+  for (const xOff of [bw / 2 - pt / 2, -(bw / 2 - pt / 2)]) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(pt, ph, bd), MAT_GREY_ROOF);
+    p.position.set(bx + xOff, cy, bz);
+    group.add(p);
+  }
 }
 
 // ── Sidewalk props ───────────────────────────────────────────────────────────

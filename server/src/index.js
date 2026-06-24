@@ -95,6 +95,11 @@ io.on('connection', (socket) => {
     rooms.get(currentRoom)?.breakFree(socket.id);
   });
 
+  socket.on('action:vehicle_hit', ({ vehicleId }) => {
+    if (!currentRoom) return;
+    rooms.get(currentRoom)?.vehicleHitPlayer(socket.id, vehicleId);
+  });
+
   socket.on('room:reset', () => {
     if (!currentRoom) return;
     rooms.get(currentRoom)?.resetToLobby();

@@ -14,6 +14,7 @@ const ARREST_DURATION = 30;    // seconds player is frozen
 const COP_TICK_MS     = 150;   // ms between cop position updates
 const ACTION_RANGE    = 7;     // generous server-side range (client uses 3.5; extra for latency)
 const MIN_ESCAPE_ATTEMPTS = 3; // must mash at least this many times before escape is possible
+const VEHICLE_HIT_COOLDOWN_MS = 1400;
 
 const PLAYER_COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
@@ -57,6 +58,7 @@ export class GameRoom {
     this._copInterval    = null;
     this.escapeAttempts  = {};          // victimId -> attempt count
     this._botMoveInterval = null;
+    this._lastVehicleHit = {};
   }
 
   // ── Lobby ────────────────────────────────────────
@@ -404,6 +406,44 @@ export class GameRoom {
       targetName: this.players.get(playerId)?.name,
       message: `${this.players.get(playerId)?.name} broke free!`,
     });
+  }
+
+  vehicleHitPlayer(playerId, vehicleId = 'traffic') {
+    if (this.state !== 'playing') return;
+    if (!this.aliveStatus[playerId] || this.arrestedPlayers[playerId]) return;
+
+    const now = Date.now();
+    if (now - (this._lastVehicleHit[playerId] || 0) < VEHICLE_HIT_COOLDOWN_MS) return;
+    this._lastVehicleHit[playerId] = now;
+
+    const player = this.players.get(playerId);
+    if (!player) return;
+
+    this.playerHp[playerId] = Math.max(0, (this.playerHp[playerId] ?? MAX_HP) - 1);
+
+    if (this.playerHp[playerId] <= 0) {
+      this.io.to(this.roomCode).emit('game:event', {
+        type: 'player_killed',
+        actorId: vehicleId,
+        targetId: playerId,
+        actorName: 'Traffic',
+        targetName: player.name,
+        message: `${player.name} got flattened by traffic!`,
+        scores: this.scores,
+      });
+      this._handleDeath(playerId);
+    } else {
+      this.io.to(this.roomCode).emit('game:event', {
+        type: 'player_damaged',
+        actorId: vehicleId,
+        targetId: playerId,
+        actorName: 'Traffic',
+        targetName: player.name,
+        hp: this.playerHp[playerId],
+        maxHp: MAX_HP,
+        message: `${player.name} got clipped by a car! (${this.playerHp[playerId]}/${MAX_HP} HP)`,
+      });
+    }
   }
 
   // ── Death & Respawn ──────────────────────────────

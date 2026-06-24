@@ -59,6 +59,10 @@ export class Network {
     this.socket.emit('action:break_free');
   }
 
+  sendVehicleHit(vehicleId) {
+    this.socket.emit('action:vehicle_hit', { vehicleId });
+  }
+
   resetRoom() {
     this.socket.emit('room:reset');
   }

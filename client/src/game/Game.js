@@ -3,6 +3,7 @@ import { buildCity } from './CityMap.js';
 import { PlayerController, setBuildingBoxes } from './PlayerController.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { createNPCs, setNPCBuildingBoxes } from './NPC.js';
+import { TrafficSystem } from './TrafficSystem.js';
 import { HUD } from '../ui/HUD.js';
 import { SoundManager } from './SoundManager.js';
 
@@ -39,11 +40,13 @@ export class Game {
     this.specTarget      = null;
 
     this._lastMoveEmit = 0;
+    this._lastVehicleHit = 0;
     this._animId       = null;
     this._clock        = new THREE.Clock();
     this._respawnTimer = null;
 
     this.cops       = new Map();  // copId -> RemotePlayer
+    this.traffic    = null;
     this.isArrested = false;
     this._arrestTimer = null;
 
@@ -90,6 +93,7 @@ export class Game {
     const buildingBoxes = buildCity(this.scene);
     setBuildingBoxes(buildingBoxes);
     setNPCBuildingBoxes(buildingBoxes);
+    this.traffic = new TrafficSystem(this.scene, 30, 7);
 
     const me = this._meInfo;
     this.player = new PlayerController(
@@ -107,7 +111,7 @@ export class Game {
       this.remotePlayers.set(p.id, rp);
     }
 
-    this.npcs = createNPCs(this.scene, 50);
+    this.npcs = createNPCs(this.scene, 95, 14);
 
     this.hud = new HUD(this.container);
     this.hud.show();
@@ -476,6 +480,7 @@ export class Game {
         }
 
         this._updateActionHintAndArrow();
+        this._checkVehicleHit();
         this.player.updateCamera();
 
       } else {
@@ -488,7 +493,8 @@ export class Game {
 
     for (const rp of this.remotePlayers.values()) rp.update(delta);
     for (const cop of this.cops.values()) cop.update(delta);
-    for (const npc of this.npcs) npc.update(delta);
+    this.traffic?.update(delta);
+    for (const npc of this.npcs) npc.update(delta, this.traffic);
     this.renderer.render(this.scene, this.player.camera);
   }
 
@@ -522,6 +528,18 @@ export class Game {
         this.hud.addEvent(`You grabbed ${task.targetName}! Bring them to ${task.locationLabel}`, 'kidnap');
       }
     }
+  }
+
+  _checkVehicleHit() {
+    if (!this.traffic || this.isBeingKidnapped || this.isArrested) return;
+    const vehicle = this.traffic.getHitVehicleAt(this.player.position);
+    if (!vehicle) return;
+    const now = Date.now();
+    if (now - (this._lastVehicleHit || 0) < 1400) return;
+    this._lastVehicleHit = now;
+    this.network.sendVehicleHit(vehicle.id);
+    this.hud.flashDamage();
+    this.sounds.play('hit');
   }
 
   _updateActionHintAndArrow() {
@@ -646,6 +664,8 @@ export class Game {
     window.removeEventListener('resize', this._boundOnResize);
     if (this._respawnTimer) clearInterval(this._respawnTimer);
     if (this._arrestTimer) clearInterval(this._arrestTimer);
+    this.traffic?.dispose();
+    this.traffic = null;
     for (const cop of this.cops.values()) cop.dispose();
     this.cops.clear();
     this.renderer.dispose();
