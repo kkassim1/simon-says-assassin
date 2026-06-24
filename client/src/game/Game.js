@@ -55,8 +55,8 @@ export class Game {
     this.inputHandler = inputHandler;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a1a2e);
-    this.scene.fog = new THREE.Fog(0x1a1a2e, 120, 340);
+    this.scene.background = new THREE.Color(0x1a2240);
+    this.scene.fog = new THREE.Fog(0x1a2240, 100, 300);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -65,19 +65,26 @@ export class Game {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
-    const ambient = new THREE.AmbientLight(0x404070, 0.6);
+    // Bright blue-sky ambient
+    const ambient = new THREE.AmbientLight(0x6688bb, 1.2);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-    sun.position.set(60, 100, 40);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.near   = 0.5;
-    sun.shadow.camera.far    = 600;
-    sun.shadow.camera.left   = -220;
-    sun.shadow.camera.right  =  220;
-    sun.shadow.camera.top    =  220;
-    sun.shadow.camera.bottom = -220;
+    // Main sun (warm evening light)
+    const moon = new THREE.DirectionalLight(0xffd5a0, 1.4);
+    moon.position.set(60, 100, 40);
+    moon.castShadow = true;
+    moon.shadow.mapSize.set(2048, 2048);
+    moon.shadow.camera.near   = 0.5;
+    moon.shadow.camera.far    = 600;
+    moon.shadow.camera.left   = -220;
+    moon.shadow.camera.right  =  220;
+    moon.shadow.camera.top    =  220;
+    moon.shadow.camera.bottom = -220;
+    this.scene.add(moon);
+
+    // Cool blue fill from opposite side
+    const sun = new THREE.DirectionalLight(0x8899cc, 0.5);
+    sun.position.set(-60, 40, -60);
     this.scene.add(sun);
 
     const buildingBoxes = buildCity(this.scene);

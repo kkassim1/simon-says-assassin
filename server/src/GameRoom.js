@@ -638,28 +638,71 @@ export class GameRoom {
 
   _tickBotMovement() {
     if (this.state !== 'playing') return;
-    const BOT_SPEED = 8;
-    const dt = 0.25;
+    const CHASE_SPEED  = 7;
+    const PATROL_SPEED = 3;
+    const dt           = 0.25;
+    const BOUND        = 140;
+
+    const HOME_ZONES = [
+      { x:  70, z:  70 }, { x: -70, z:  70 },
+      { x:  70, z: -70 }, { x: -70, z: -70 },
+      { x:   0, z:  90 }, { x:  90, z:   0 },
+      { x: -90, z:   0 }, { x:   0, z: -90 },
+    ];
 
     for (const [id, player] of this.players) {
       if (!player.isBot || !this.aliveStatus[id]) continue;
-      const task = this.tasks[id];
-      if (!task || !task.targetId || task.type === 'survive') continue;
 
-      const target = this.players.get(task.targetId);
-      if (!target || !this.aliveStatus[task.targetId]) continue;
+      const task   = this.tasks[id];
+      const target = task?.targetId ? this.players.get(task.targetId) : null;
+      const targetAlive = target && this.aliveStatus[task.targetId] && task.type !== 'survive';
 
-      const dx = target.x - player.x;
-      const dz = target.z - player.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > 2) {
-        player.x += (dx / dist) * BOT_SPEED * dt;
-        player.z += (dz / dist) * BOT_SPEED * dt;
-        player.rot = Math.atan2(dx, dz);
-        this.io.to(this.roomCode).emit('player:move', {
-          id, x: player.x, y: 0, z: player.z, rot: player.rot,
-        });
+      // A bot chases a human ONLY if that human's task is to eliminate/kidnap this bot.
+      // This creates a 1-on-1 duel: the player hunts their target, who hunts them back.
+      // All other bots patrol their home zones and stay out of the way.
+      let shouldChase = false;
+      if (targetAlive) {
+        if (target.isBot) {
+          shouldChase = true; // bot-on-bot: always chase
+        } else {
+          const humanTask = this.tasks[target.id];
+          shouldChase = humanTask?.targetId === id; // only if human is assigned to this bot
+        }
       }
+
+      let goalX, goalZ, speed;
+
+      if (shouldChase) {
+        const d = Math.hypot(target.x - player.x, target.z - player.z);
+        if (d <= 2) continue;
+        goalX = target.x;
+        goalZ = target.z;
+        speed = CHASE_SPEED;
+      } else {
+        const zone = HOME_ZONES[player.spawnIdx % HOME_ZONES.length];
+        if (!player._wanderGoal || Math.hypot(player._wanderGoal.x - player.x, player._wanderGoal.z - player.z) < 5) {
+          player._wanderGoal = {
+            x: zone.x + (Math.random() - 0.5) * 50,
+            z: zone.z + (Math.random() - 0.5) * 50,
+          };
+        }
+        goalX = player._wanderGoal.x;
+        goalZ = player._wanderGoal.z;
+        speed = PATROL_SPEED;
+      }
+
+      const dx   = goalX - player.x;
+      const dz   = goalZ - player.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 1) continue;
+
+      player.x = Math.max(-BOUND, Math.min(BOUND, player.x + (dx / dist) * speed * dt));
+      player.z = Math.max(-BOUND, Math.min(BOUND, player.z + (dz / dist) * speed * dt));
+      player.rot = Math.atan2(dx / dist, dz / dist);
+
+      this.io.to(this.roomCode).emit('player:move', {
+        id, x: player.x, y: 0, z: player.z, rot: player.rot,
+      });
     }
   }
 

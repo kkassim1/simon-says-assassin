@@ -1,9 +1,17 @@
 import * as THREE from 'three';
 
-const NPC_COLORS = [0x95a5a6, 0xbdc3c7, 0x7f8c8d, 0xecf0f1];
-const NPC_NAMES = ['Civilian', 'Passerby', 'Bystander', 'Tourist'];
-const NPC_SPEED = 2.5;
+const NPC_SPEED  = 2.5;
 const NPC_RADIUS = 0.5;
+
+// Varied skin tones
+const SKIN_TONES = [0xf5cba7, 0xe8b88a, 0xc68642, 0x8d5524, 0xfad9b0, 0xd4956a];
+
+// Varied civilian clothing colors
+const JACKET_COLORS = [
+  0x2980b9, 0x8e44ad, 0x27ae60, 0xc0392b, 0xe67e22,
+  0x16a085, 0x2c3e50, 0x7f8c8d, 0xd35400, 0x1abc9c,
+];
+const PANTS_COLORS = [0x1a2535, 0x2c3e50, 0x34495e, 0x4a4a4a, 0x1e1e2e, 0x2e2e1e];
 
 let _buildingBoxes = [];
 export function setNPCBuildingBoxes(boxes) { _buildingBoxes = boxes; }
@@ -21,7 +29,7 @@ function _collidesWithBuilding(x, z) {
 export class NPC {
   constructor(scene, id) {
     this.scene = scene;
-    this.id = id;
+    this.id    = id;
 
     this.position = new THREE.Vector3(
       (Math.random() - 0.5) * 260,
@@ -29,87 +37,179 @@ export class NPC {
       (Math.random() - 0.5) * 260
     );
 
-    this.target = this._newTarget();
-    this.group = new THREE.Group();
+    this.target   = this._newTarget();
+    this.group    = new THREE.Group();
+    this._animT   = Math.random() * Math.PI * 2; // offset so they don't all sync
+    this._waiting  = false;
+    this._idleTime = 0;
+    this._waitTime = 1 + Math.random() * 3;
+    this._dir      = new THREE.Vector3();
+
     this._build();
     this.group.position.copy(this.position);
     scene.add(this.group);
-
-    this._idleTime = 0;
-    this._waitTime = 1 + Math.random() * 3;
-    this._waiting = false;
-    this._dir = new THREE.Vector3();
   }
 
   _build() {
-    const color = NPC_COLORS[this.id % NPC_COLORS.length];
+    const skinColor    = SKIN_TONES[this.id % SKIN_TONES.length];
+    const jacketColor  = JACKET_COLORS[this.id % JACKET_COLORS.length];
+    const pantsColor   = PANTS_COLORS[this.id % PANTS_COLORS.length];
 
-    const bodyGeo = new THREE.CapsuleGeometry(0.38, 0.9, 4, 8);
-    const bodyMat = new THREE.MeshLambertMaterial({ color });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = 0.85;
-    body.castShadow = true;
-    this.group.add(body);
+    const skinM   = new THREE.MeshLambertMaterial({ color: skinColor });
+    const jacketM = new THREE.MeshLambertMaterial({ color: jacketColor });
+    const pantsM  = new THREE.MeshLambertMaterial({ color: pantsColor });
+    const shoeM   = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    const eyeM    = new THREE.MeshBasicMaterial({ color: 0x111111 });
 
-    const headGeo = new THREE.SphereGeometry(0.25, 6, 6);
-    const headMat = new THREE.MeshLambertMaterial({ color: 0xf0d9b5 });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.y = 1.75;
-    this.group.add(head);
+    function mk(geo, mat, x, y, z, shadow = true) {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      if (shadow) m.castShadow = true;
+      return m;
+    }
+
+    // ── Leg pivot groups (pivot at hip) ─────────────────────────
+    this._legL = new THREE.Group();
+    this._legL.position.set(-0.13, 0.78, 0);
+    this._legL.add(mk(new THREE.BoxGeometry(0.18, 0.58, 0.2),  pantsM, 0, -0.29, 0));
+    this._legL.add(mk(new THREE.BoxGeometry(0.2,  0.15, 0.3),  shoeM,  0, -0.65, 0.03));
+    this.group.add(this._legL);
+
+    this._legR = new THREE.Group();
+    this._legR.position.set(0.13, 0.78, 0);
+    this._legR.add(mk(new THREE.BoxGeometry(0.18, 0.58, 0.2),  pantsM, 0, -0.29, 0));
+    this._legR.add(mk(new THREE.BoxGeometry(0.2,  0.15, 0.3),  shoeM,  0, -0.65, 0.03));
+    this.group.add(this._legR);
+
+    // ── Torso ────────────────────────────────────────────────────
+    this.group.add(mk(new THREE.BoxGeometry(0.44, 0.6, 0.24), jacketM, 0, 1.1, 0));
+
+    // ── Arm pivot groups ─────────────────────────────────────────
+    const armGeo  = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6);
+    const handGeo = new THREE.SphereGeometry(0.09, 5, 5);
+
+    const shL = new THREE.Group();
+    shL.position.set(-0.31, 1.35, 0);
+    shL.rotation.z = 0.2;
+    this.group.add(shL);
+    this._armL = new THREE.Group();
+    this._armL.add(mk(armGeo,  jacketM, 0, -0.25, 0));
+    this._armL.add(mk(handGeo, skinM,   0, -0.52, 0, false));
+    shL.add(this._armL);
+
+    const shR = new THREE.Group();
+    shR.position.set(0.31, 1.35, 0);
+    shR.rotation.z = -0.2;
+    this.group.add(shR);
+    this._armR = new THREE.Group();
+    this._armR.add(mk(armGeo,  jacketM, 0, -0.25, 0));
+    this._armR.add(mk(handGeo, skinM,   0, -0.52, 0, false));
+    shR.add(this._armR);
+
+    // ── Neck ─────────────────────────────────────────────────────
+    this.group.add(mk(new THREE.CylinderGeometry(0.09, 0.11, 0.14, 6), skinM, 0, 1.47, 0, false));
+
+    // ── Head ─────────────────────────────────────────────────────
+    this.group.add(mk(new THREE.SphereGeometry(0.24, 7, 7), skinM, 0, 1.79, 0));
+
+    // ── Eyes ─────────────────────────────────────────────────────
+    const eyeGeo = new THREE.SphereGeometry(0.044, 4, 4);
+    this.group.add(mk(eyeGeo, eyeM, -0.09, 1.83, 0.21, false));
+    this.group.add(mk(eyeGeo, eyeM,  0.09, 1.83, 0.21, false));
+
+    // ── Simple hat (varies by id) ────────────────────────────────
+    _addHat(this.group, this.id % 3, jacketM);
   }
 
   _newTarget() {
-    const px = (Math.random() - 0.5) * 260;
-    const pz = (Math.random() - 0.5) * 260;
-    return new THREE.Vector3(px, 0, pz);
+    return new THREE.Vector3(
+      (Math.random() - 0.5) * 260,
+      0,
+      (Math.random() - 0.5) * 260
+    );
   }
 
   update(delta) {
     if (this._waiting) {
       this._idleTime += delta;
+      // idle arm sway
+      const t = this._animT + this._idleTime * 1.5;
+      this._armL.rotation.x =  Math.sin(t) * 0.04;
+      this._armR.rotation.x = -Math.sin(t) * 0.04;
+      this._legL.rotation.x = 0;
+      this._legR.rotation.x = 0;
       if (this._idleTime >= this._waitTime) {
-        this._waiting = false;
+        this._waiting  = false;
         this._idleTime = 0;
-        this.target = this._newTarget();
+        this.target    = this._newTarget();
       }
       return;
     }
 
-    const dir = this._dir.subVectors(this.target, this.position);
+    const dir  = this._dir.subVectors(this.target, this.position);
     const dist = dir.length();
 
     if (dist < 0.5) {
-      this._waiting = true;
+      this._waiting  = true;
       this._waitTime = 1 + Math.random() * 4;
       return;
     }
 
     dir.normalize();
     const step = Math.min(NPC_SPEED * delta, dist);
-    const nx = Math.max(-155, Math.min(155, this.position.x + dir.x * step));
-    const nz = Math.max(-155, Math.min(155, this.position.z + dir.z * step));
+    const nx   = Math.max(-155, Math.min(155, this.position.x + dir.x * step));
+    const nz   = Math.max(-155, Math.min(155, this.position.z + dir.z * step));
 
     if (_collidesWithBuilding(nx, nz)) {
-      // Hit a building — wait briefly and pick a new destination
-      this._waiting = true;
+      this._waiting  = true;
       this._waitTime = 0.5 + Math.random() * 1.5;
-      this.target = this._newTarget();
+      this.target    = this._newTarget();
       return;
     }
 
     this.position.x = nx;
     this.position.z = nz;
-
     this.group.position.copy(this.position);
     this.group.rotation.y = Math.atan2(dir.x, dir.z);
+
+    // Walk animation
+    this._animT += delta;
+    const t = this._animT * Math.PI * 5;
+    this._legL.rotation.x =  Math.sin(t) * 0.5;
+    this._legR.rotation.x = -Math.sin(t) * 0.5;
+    this._armL.rotation.x =  Math.sin(t) * 0.38;
+    this._armR.rotation.x = -Math.sin(t) * 0.38;
   }
 
-  getPosition() {
-    return this.position;
+  getPosition() { return this.position; }
+
+  dispose() { this.scene.remove(this.group); }
+}
+
+function _addHat(group, style, jacketMat) {
+  const darkM  = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const brownM = new THREE.MeshLambertMaterial({ color: 0x3d2b1f });
+
+  function mk(geo, mat, x, y, z) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    group.add(m);
   }
 
-  dispose() {
-    this.scene.remove(this.group);
+  switch (style) {
+    case 0: // baseball cap
+      mk(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 8), darkM,  0, 2.21, 0);
+      mk(new THREE.CylinderGeometry(0.18, 0.26, 0.18, 8), darkM,  0, 2.30, 0);
+      mk(new THREE.BoxGeometry(0.26, 0.04, 0.18),          darkM,  0, 2.20, 0.22);
+      break;
+    case 1: // beanie (jacket color)
+      mk(new THREE.SphereGeometry(0.27, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), jacketMat, 0, 1.97, 0);
+      mk(new THREE.SphereGeometry(0.065, 5, 5), new THREE.MeshLambertMaterial({ color: 0xffffff }), 0, 2.28, 0);
+      break;
+    case 2: // fedora
+      mk(new THREE.CylinderGeometry(0.33, 0.33, 0.05, 8), brownM, 0, 2.21, 0);
+      mk(new THREE.CylinderGeometry(0.18, 0.22, 0.22, 8), brownM, 0, 2.32, 0);
+      break;
   }
 }
 
