@@ -89,6 +89,10 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 #join-row input { flex: 1; font-size: 1.1rem; letter-spacing: 4px; text-transform: uppercase; }
 
 #lobby-actions { display: flex; flex-direction: column; gap: 12px; }
+#btn-create.primary {
+  background: rgba(255,255,255,0.1);
+  box-shadow: none;
+}
 
 #lobby-room { display: flex; flex-direction: column; gap: 12px; }
 #room-code-display {
@@ -154,12 +158,86 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 #btn-close-instructions:hover { background: rgba(255,255,255,0.15); }
 
 /* ── HUD HELP BUTTON & IN-GAME INSTRUCTIONS ── */
-#btn-hud-help {
+#btn-hud-help,
+#btn-hud-settings {
   background: rgba(255,255,255,0.1); border: none; color: #fff;
   border-radius: 8px; padding: 2px 8px; cursor: pointer; font-size: 0.85rem;
   pointer-events: all;
 }
-#btn-hud-help:hover { background: rgba(255,255,255,0.2); }
+#btn-hud-help:hover,
+#btn-hud-settings:hover { background: rgba(255,255,255,0.2); }
+
+/* ── LOADING + SETTINGS ───────────────────────── */
+#loading-overlay {
+  position: absolute; inset: 0; z-index: 500;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(8, 8, 20, 0.92);
+  backdrop-filter: blur(8px);
+}
+.loading-panel {
+  width: min(340px, 88vw);
+  display: flex; flex-direction: column; gap: 14px;
+  align-items: stretch; text-align: center;
+}
+.loading-mark {
+  font-size: 1.6rem; font-weight: 900; letter-spacing: 6px;
+  color: var(--gold);
+}
+#loading-text { color: #ddd; font-size: 0.95rem; font-weight: 700; }
+.loading-bar {
+  height: 8px; overflow: hidden; border-radius: 999px;
+  background: rgba(255,255,255,0.1);
+}
+.loading-bar span {
+  display: block; height: 100%; width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--red), var(--gold));
+  animation: loadingSlide 1s ease-in-out infinite alternate;
+}
+@keyframes loadingSlide {
+  from { transform: translateX(-20%); }
+  to { transform: translateX(160%); }
+}
+
+.settings-overlay {
+  position: fixed; inset: 0; z-index: 450;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.72); backdrop-filter: blur(6px);
+  pointer-events: all;
+}
+.settings-panel {
+  width: min(420px, 92vw);
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.settings-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+}
+.settings-head h2 {
+  font-size: 1.25rem; font-weight: 900;
+}
+.settings-close {
+  border: none; border-radius: 8px; padding: 7px 12px;
+  background: rgba(255,255,255,0.1); color: #fff;
+  font-weight: 700; cursor: pointer;
+}
+.setting-row {
+  display: grid; grid-template-columns: 130px 1fr; gap: 14px;
+  align-items: center;
+  font-size: 0.9rem; color: #ddd;
+}
+.setting-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--gold);
+}
+.setting-row select {
+  width: 100%; padding: 8px 10px;
+  border-radius: 8px; border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.08); color: #fff;
+}
 
 #hud-instructions {
   position: absolute; inset: 0; z-index: 150;

@@ -38,8 +38,35 @@ io.on('connection', (socket) => {
     rooms.set(code, room);
     currentRoom = code;
     const ok = room.addPlayer(socket, playerName);
-    socket.emit('room:joined', { roomCode: code, ok });
+    socket.emit('room:joined', { roomCode: code, ok, isHost: true });
     console.log(`[room] created ${code} by ${socket.id}`);
+  });
+
+  socket.on('room:quickplay', ({ playerName }) => {
+    let code = null;
+    let room = null;
+    for (const [candidateCode, candidateRoom] of rooms) {
+      if (candidateRoom.state === 'lobby' && candidateRoom.players.size < 8) {
+        code = candidateCode;
+        room = candidateRoom;
+        break;
+      }
+    }
+    let isHost = false;
+    if (!room) {
+      code = generateRoomCode();
+      room = new GameRoom(io, code, () => rooms.delete(code));
+      rooms.set(code, room);
+      isHost = true;
+      console.log(`[room] quickplay created ${code} by ${socket.id}`);
+    }
+    const ok = room.addPlayer(socket, playerName);
+    if (!ok) {
+      socket.emit('room:error', { message: 'No open rooms available. Try again.' });
+      return;
+    }
+    currentRoom = code;
+    socket.emit('room:joined', { roomCode: code, ok, isHost });
   });
 
   socket.on('room:join', ({ roomCode, playerName }) => {
@@ -55,7 +82,8 @@ io.on('connection', (socket) => {
       return;
     }
     currentRoom = code;
-    socket.emit('room:joined', { roomCode: code, ok });
+    const firstReal = Array.from(room.players.values()).find(p => !p.isBot);
+    socket.emit('room:joined', { roomCode: code, ok, isHost: firstReal?.id === socket.id });
   });
 
   socket.on('room:start', () => {

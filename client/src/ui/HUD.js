@@ -1,3 +1,5 @@
+import { createSettingsPanel, settingsStore } from './Settings.js';
+
 export class HUD {
   constructor(container) {
     this.el = document.createElement('div');
@@ -7,6 +9,7 @@ export class HUD {
         <div id="timer-display">⏱ <span id="timer-val">10:00</span></div>
         <div id="score-display">Score: <span id="score-val">0</span></div>
         <div id="wanted-display" style="display:none"></div>
+        <button id="btn-hud-settings">⚙</button>
         <button id="btn-hud-help">❓</button>
       </div>
 
@@ -66,7 +69,13 @@ export class HUD {
       <div id="damage-flash"></div>
     `;
     container.appendChild(this.el);
+    this.settingsPanel = createSettingsPanel(settingsStore);
+    container.appendChild(this.settingsPanel.el);
     this._gameTimerInterval = null;
+
+    this.el.querySelector('#btn-hud-settings').addEventListener('click', () => {
+      this.settingsPanel.show();
+    });
 
     this.el.querySelector('#btn-hud-help').addEventListener('click', () => {
       this.el.querySelector('#hud-instructions').style.display = 'flex';
@@ -255,6 +264,10 @@ export class HUD {
 
   show() { this.el.style.display = 'block'; }
   hide() { this.el.style.display = 'none'; }
+
+  destroy() {
+    this.settingsPanel?.destroy();
+  }
 }
 
 function _mmss(totalSec) {

@@ -1,3 +1,5 @@
+import { createSettingsPanel, settingsStore } from './Settings.js';
+
 export class Lobby {
   constructor(container, network) {
     this.container = container;
@@ -19,6 +21,7 @@ export class Lobby {
         </div>
 
         <div id="lobby-actions">
+          <button id="btn-quickplay" class="lobby-btn primary">Quick Play</button>
           <button id="btn-create" class="lobby-btn primary">Create Room</button>
           <div class="divider">— or —</div>
           <div id="join-row">
@@ -37,6 +40,7 @@ export class Lobby {
         <div id="lobby-error" style="display:none"></div>
 
         <button id="btn-how-to-play" class="lobby-btn secondary" style="margin-top:4px">❓ How to Play</button>
+        <button id="btn-settings" class="lobby-btn secondary">Settings</button>
 
         <div id="demo-notice">Free demo: 3 games remaining</div>
       </div>
@@ -93,6 +97,8 @@ export class Lobby {
       </div>
     `;
     container.appendChild(this.el);
+    this.settingsPanel = createSettingsPanel(settingsStore);
+    container.appendChild(this.settingsPanel.el);
 
     this._isHost = false;
     this._myId = null;
@@ -105,6 +111,11 @@ export class Lobby {
   }
 
   _bind() {
+    this.el.querySelector('#btn-quickplay').addEventListener('click', () => {
+      const name = this._getName();
+      this.network.quickPlay(name);
+    });
+
     this.el.querySelector('#btn-create').addEventListener('click', () => {
       const name = this._getName();
       this.network.createRoom(name);
@@ -124,6 +135,10 @@ export class Lobby {
 
     this.el.querySelector('#btn-how-to-play').addEventListener('click', () => {
       this.el.querySelector('#instructions-overlay').style.display = 'flex';
+    });
+
+    this.el.querySelector('#btn-settings').addEventListener('click', () => {
+      this.settingsPanel.show();
     });
 
     this.el.querySelector('#btn-close-instructions').addEventListener('click', () => {

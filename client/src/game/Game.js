@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { buildCity } from './CityMap.js';
 import { PlayerController, setBuildingBoxes } from './PlayerController.js';
 import { RemotePlayer } from './RemotePlayer.js';
@@ -6,6 +9,7 @@ import { createNPCs, setNPCBuildingBoxes } from './NPC.js';
 import { TrafficSystem } from './TrafficSystem.js';
 import { HUD } from '../ui/HUD.js';
 import { SoundManager } from './SoundManager.js';
+import { settingsStore } from '../ui/Settings.js';
 
 const ACTION_RANGE        = 3.5;
 const KIDNAP_DELIVER_RANGE = 4;
@@ -23,7 +27,11 @@ export class Game {
     this.remotePlayers = new Map();
     this.npcs          = [];
     this.hud           = null;
-    this.sounds        = new SoundManager();
+    this.sounds        = new SoundManager(settingsStore);
+    this.settings      = settingsStore.get();
+    this.composer      = null;
+    this.bloomPass     = null;
+    this._unsubscribeSettings = null;
 
     this.myTask           = null;
     this.scores           = {};
@@ -62,10 +70,12 @@ export class Game {
     this.scene.fog = new THREE.Fog(0x1a2240, 100, 300);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this._pixelRatioForQuality(this.settings.graphicsQuality));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
     this.container.appendChild(this.renderer.domElement);
 
     // Bright blue-sky ambient
@@ -115,6 +125,8 @@ export class Game {
 
     this.hud = new HUD(this.container);
     this.hud.show();
+    this._setupPostProcessing();
+    this._unsubscribeSettings = settingsStore.subscribe((settings) => this._applySettings(settings));
 
     this._boundOnResize = this._onResize.bind(this);
     window.addEventListener('resize', this._boundOnResize);
@@ -172,6 +184,8 @@ export class Game {
       this.hud.setAllyInfo(this.myAllyName);
       this.hud.setBountyActive(this.bountyTargetId === this.myId);
       this.hud.hideRespawn();
+      this.sounds.startMusic();
+      this.sounds.startAmbience();
       this.sounds.play('task');
     });
 
@@ -239,6 +253,7 @@ export class Game {
 
     net.on('game:end', (data) => {
       this.gameActive = false;
+      this.sounds.stopAllLoops();
       this.hud.showGameEnd(data.leaderboard, this.myId, () => {
         this.network.resetRoom();
       });
@@ -495,7 +510,8 @@ export class Game {
     for (const cop of this.cops.values()) cop.update(delta);
     this.traffic?.update(delta);
     for (const npc of this.npcs) npc.update(delta, this.traffic);
-    this.renderer.render(this.scene, this.player.camera);
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.player.camera);
   }
 
   _tryAction() {
@@ -657,6 +673,41 @@ export class Game {
     this.player.camera.aspect = window.innerWidth / window.innerHeight;
     this.player.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer?.setSize(window.innerWidth, window.innerHeight);
+    this.bloomPass?.resolution.set(window.innerWidth, window.innerHeight);
+  }
+
+  _setupPostProcessing() {
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.player.camera));
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.45,
+      0.35,
+      0.72
+    );
+    this.composer.addPass(this.bloomPass);
+    this._applySettings(this.settings);
+  }
+
+  _applySettings(settings) {
+    this.settings = settings;
+    if (this.renderer) {
+      this.renderer.setPixelRatio(this._pixelRatioForQuality(settings.graphicsQuality));
+      this.renderer.shadowMap.enabled = settings.graphicsQuality !== 'low';
+    }
+    if (this.bloomPass) {
+      const quality = settings.graphicsQuality;
+      this.bloomPass.enabled = quality !== 'low';
+      this.bloomPass.strength = quality === 'high' ? 0.45 : 0.28;
+      this.bloomPass.radius = quality === 'high' ? 0.35 : 0.2;
+    }
+  }
+
+  _pixelRatioForQuality(quality) {
+    if (quality === 'low') return 1;
+    if (quality === 'medium') return Math.min(window.devicePixelRatio, 1.5);
+    return Math.min(window.devicePixelRatio, 2);
   }
 
   destroy() {
@@ -664,15 +715,19 @@ export class Game {
     window.removeEventListener('resize', this._boundOnResize);
     if (this._respawnTimer) clearInterval(this._respawnTimer);
     if (this._arrestTimer) clearInterval(this._arrestTimer);
+    this._unsubscribeSettings?.();
+    this.sounds.destroy();
     this.traffic?.dispose();
     this.traffic = null;
     for (const cop of this.cops.values()) cop.dispose();
     this.cops.clear();
+    this.composer?.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode === this.container) {
       this.container.removeChild(this.renderer.domElement);
     }
     if (this.hud?.el?.parentNode === this.container) {
+      this.hud.destroy?.();
       this.container.removeChild(this.hud.el);
     }
   }

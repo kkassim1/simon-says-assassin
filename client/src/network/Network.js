@@ -1,8 +1,10 @@
 import { io } from 'socket.io-client';
 
 // When accessed from another device on LAN, use that device's hostname automatically
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ||
-  `http://${window.location.hostname}:3000`;
+const isLocalClient = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+const SERVER_URL = isLocalClient
+  ? `http://${window.location.hostname}:3000`
+  : (import.meta.env.VITE_SERVER_URL || `http://${window.location.hostname}:3000`);
 
 export class Network {
   constructor() {
@@ -33,6 +35,10 @@ export class Network {
 
   joinRoom(roomCode, playerName) {
     this.socket.emit('room:join', { roomCode, playerName });
+  }
+
+  quickPlay(playerName) {
+    this.socket.emit('room:quickplay', { playerName });
   }
 
   startGame() {
