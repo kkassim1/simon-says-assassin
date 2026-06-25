@@ -16,10 +16,11 @@ const KIDNAP_DELIVER_RANGE = 4;
 const MOVE_EMIT_RATE      = 50;
 
 export class Game {
-  constructor(network, myId, playerList, container) {
+  constructor(network, myId, playerList, container, onLeaveMatch = null) {
     this.network   = network;
     this.myId      = myId;
     this.container = container;
+    this.onLeaveMatch = onLeaveMatch;
 
     this.scene         = null;
     this.renderer      = null;
@@ -123,7 +124,11 @@ export class Game {
 
     this.npcs = createNPCs(this.scene, 95, 14);
 
-    this.hud = new HUD(this.container);
+    this.hud = new HUD(this.container, () => {
+      this.sounds.stopAllLoops();
+      this.network.leaveRoom();
+      this.onLeaveMatch?.();
+    });
     this.hud.show();
     this._setupPostProcessing();
     this._unsubscribeSettings = settingsStore.subscribe((settings) => this._applySettings(settings));

@@ -133,6 +133,19 @@ io.on('connection', (socket) => {
     rooms.get(currentRoom)?.resetToLobby();
   });
 
+  socket.on('room:leave', () => {
+    if (!currentRoom) {
+      socket.emit('room:left');
+      return;
+    }
+    const code = currentRoom;
+    const room = rooms.get(code);
+    if (room) room.removePlayer(socket.id);
+    socket.leave(code);
+    currentRoom = null;
+    socket.emit('room:left');
+  });
+
   socket.on('disconnect', () => {
     console.log(`[-] ${socket.id} disconnected`);
     if (currentRoom) {

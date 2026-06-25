@@ -1,7 +1,8 @@
 import { createSettingsPanel, settingsStore } from './Settings.js';
 
 export class HUD {
-  constructor(container) {
+  constructor(container, onLeaveMatch = null) {
+    this.onLeaveMatch = onLeaveMatch;
     this.el = document.createElement('div');
     this.el.id = 'hud';
     this.el.innerHTML = `
@@ -9,8 +10,19 @@ export class HUD {
         <div id="timer-display">⏱ <span id="timer-val">10:00</span></div>
         <div id="score-display">Score: <span id="score-val">0</span></div>
         <div id="wanted-display" style="display:none"></div>
+        <button id="btn-hud-menu">☰</button>
         <button id="btn-hud-settings">⚙</button>
         <button id="btn-hud-help">❓</button>
+      </div>
+
+      <div id="pause-menu" style="display:none">
+        <div id="pause-panel">
+          <h2>Game Menu</h2>
+          <button id="btn-resume-game">Resume</button>
+          <button id="btn-pause-settings">Settings</button>
+          <button id="btn-pause-controls">Controls</button>
+          <button id="btn-leave-match">Leave Match</button>
+        </div>
       </div>
 
       <div id="hud-instructions" style="display:none">
@@ -72,6 +84,29 @@ export class HUD {
     this.settingsPanel = createSettingsPanel(settingsStore);
     container.appendChild(this.settingsPanel.el);
     this._gameTimerInterval = null;
+    this._boundKeyDown = this._onKeyDown.bind(this);
+    window.addEventListener('keydown', this._boundKeyDown);
+
+    this.el.querySelector('#btn-hud-menu').addEventListener('click', () => {
+      this.toggleMenu();
+    });
+
+    this.el.querySelector('#btn-resume-game').addEventListener('click', () => {
+      this.hideMenu();
+    });
+
+    this.el.querySelector('#btn-pause-settings').addEventListener('click', () => {
+      this.settingsPanel.show();
+    });
+
+    this.el.querySelector('#btn-pause-controls').addEventListener('click', () => {
+      this.el.querySelector('#hud-instructions').style.display = 'flex';
+    });
+
+    this.el.querySelector('#btn-leave-match').addEventListener('click', () => {
+      this.hideMenu();
+      this.onLeaveMatch?.();
+    });
 
     this.el.querySelector('#btn-hud-settings').addEventListener('click', () => {
       this.settingsPanel.show();
@@ -83,6 +118,19 @@ export class HUD {
     this.el.querySelector('#btn-hud-help-close').addEventListener('click', () => {
       this.el.querySelector('#hud-instructions').style.display = 'none';
     });
+  }
+
+  toggleMenu() {
+    const menu = this.el.querySelector('#pause-menu');
+    menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
+  }
+
+  hideMenu() {
+    this.el.querySelector('#pause-menu').style.display = 'none';
+  }
+
+  _onKeyDown(event) {
+    if (event.key === 'Escape') this.toggleMenu();
   }
 
   // ── Game timer ───────────────────────────────────
@@ -266,6 +314,7 @@ export class HUD {
   hide() { this.el.style.display = 'none'; }
 
   destroy() {
+    window.removeEventListener('keydown', this._boundKeyDown);
     this.settingsPanel?.destroy();
   }
 }

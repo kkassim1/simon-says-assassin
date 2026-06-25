@@ -36,6 +36,10 @@ async function main() {
     alert(message);
   });
 
+  network.on('room:left', () => {
+    returnToLobby();
+  });
+
   let latestPlayers = [];
   network.on('lobby:update', ({ players }) => {
     latestPlayers = players;
@@ -68,7 +72,7 @@ function launchGame(players, myId, container) {
     inputHandler = new InputHandler();
   }
 
-  game = new Game(network, myId, players, container);
+  game = new Game(network, myId, players, container, returnToLobby);
   game.init(inputHandler);
 }
 
@@ -110,6 +114,10 @@ function returnToLobby() {
     inputHandler.destroy?.();
     inputHandler = null;
   }
+  lobby.el.querySelector('#lobby-actions').style.display = 'flex';
+  lobby.el.querySelector('#lobby-room').style.display = 'none';
+  lobby.el.querySelector('#btn-start').style.display = 'none';
+  lobby.el.querySelector('#waiting-msg').textContent = 'Waiting for players...';
   lobby.show();
 }
 

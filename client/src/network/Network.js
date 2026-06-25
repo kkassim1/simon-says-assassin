@@ -45,6 +45,10 @@ export class Network {
     this.socket.emit('room:start');
   }
 
+  leaveRoom() {
+    this.socket.emit('room:leave');
+  }
+
   sendMove(state) {
     this.socket.emit('player:move', state);
   }
