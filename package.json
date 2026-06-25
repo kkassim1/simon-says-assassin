@@ -1,0 +1,14 @@
+{
+  "name": "simon-says-assassin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix server run dev & npm --prefix client run dev",
+    "desktop": "electron electron/main.cjs",
+    "desktop:dev": "VITE_CLIENT_URL=http://localhost:5173 electron electron/main.cjs"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7"
+  }
+}

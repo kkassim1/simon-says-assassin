@@ -14,6 +14,33 @@ const ARREST_DURATION = 30;    // seconds player is frozen
 const COP_TICK_MS     = 150;   // ms between cop position updates
 const ACTION_RANGE    = 7;     // generous server-side range (client uses 3.5; extra for latency)
 const MIN_ESCAPE_ATTEMPTS = 3; // must mash at least this many times before escape is possible
+const VEHICLE_HIT_COOLDOWN_MS = 1400;
+const BOT_RADIUS = 1.2;
+const BOT_SEPARATION_RADIUS = 9;
+const BOT_SEPARATION_STRENGTH = 0.65;
+const BOT_STUCK_DISTANCE = 0.35;
+
+const CITY_GRID = [
+  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
+  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [1, 2, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 2, 0, 1],
+  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 2, 1, 0, 1],
+  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [1, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 0, 1, 1, 0, 1],
+  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [1, 1, 0, 1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 1],
+  [2, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 2],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
+];
+const CITY_CELL = 20;
+const CITY_OFFSET_X = -(CITY_GRID[0].length * CITY_CELL) / 2 + CITY_CELL / 2;
+const CITY_OFFSET_Z = -(CITY_GRID.length * CITY_CELL) / 2 + CITY_CELL / 2;
 
 const PLAYER_COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
@@ -57,6 +84,7 @@ export class GameRoom {
     this._copInterval    = null;
     this.escapeAttempts  = {};          // victimId -> attempt count
     this._botMoveInterval = null;
+    this._lastVehicleHit = {};
   }
 
   // ── Lobby ────────────────────────────────────────
@@ -406,6 +434,44 @@ export class GameRoom {
     });
   }
 
+  vehicleHitPlayer(playerId, vehicleId = 'traffic') {
+    if (this.state !== 'playing') return;
+    if (!this.aliveStatus[playerId] || this.arrestedPlayers[playerId]) return;
+
+    const now = Date.now();
+    if (now - (this._lastVehicleHit[playerId] || 0) < VEHICLE_HIT_COOLDOWN_MS) return;
+    this._lastVehicleHit[playerId] = now;
+
+    const player = this.players.get(playerId);
+    if (!player) return;
+
+    this.playerHp[playerId] = Math.max(0, (this.playerHp[playerId] ?? MAX_HP) - 1);
+
+    if (this.playerHp[playerId] <= 0) {
+      this.io.to(this.roomCode).emit('game:event', {
+        type: 'player_killed',
+        actorId: vehicleId,
+        targetId: playerId,
+        actorName: 'Traffic',
+        targetName: player.name,
+        message: `${player.name} got flattened by traffic!`,
+        scores: this.scores,
+      });
+      this._handleDeath(playerId);
+    } else {
+      this.io.to(this.roomCode).emit('game:event', {
+        type: 'player_damaged',
+        actorId: vehicleId,
+        targetId: playerId,
+        actorName: 'Traffic',
+        targetName: player.name,
+        hp: this.playerHp[playerId],
+        maxHp: MAX_HP,
+        message: `${player.name} got clipped by a car! (${this.playerHp[playerId]}/${MAX_HP} HP)`,
+      });
+    }
+  }
+
   // ── Death & Respawn ──────────────────────────────
 
   _handleDeath(targetId) {
@@ -638,29 +704,125 @@ export class GameRoom {
 
   _tickBotMovement() {
     if (this.state !== 'playing') return;
-    const BOT_SPEED = 8;
-    const dt = 0.25;
+    const CHASE_SPEED  = 7;
+    const PATROL_SPEED = 3;
+    const dt           = 0.25;
+    const BOUND        = 140;
+
+    const HOME_ZONES = [
+      { x:  70, z:  70 }, { x: -70, z:  70 },
+      { x:  70, z: -70 }, { x: -70, z: -70 },
+      { x:   0, z:  90 }, { x:  90, z:   0 },
+      { x: -90, z:   0 }, { x:   0, z: -90 },
+    ];
 
     for (const [id, player] of this.players) {
       if (!player.isBot || !this.aliveStatus[id]) continue;
-      const task = this.tasks[id];
-      if (!task || !task.targetId || task.type === 'survive') continue;
 
-      const target = this.players.get(task.targetId);
-      if (!target || !this.aliveStatus[task.targetId]) continue;
+      const task   = this.tasks[id];
+      const target = task?.targetId ? this.players.get(task.targetId) : null;
+      const targetAlive = target && this.aliveStatus[task.targetId] && task.type !== 'survive';
 
-      const dx = target.x - player.x;
-      const dz = target.z - player.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > 2) {
-        player.x += (dx / dist) * BOT_SPEED * dt;
-        player.z += (dz / dist) * BOT_SPEED * dt;
-        player.rot = Math.atan2(dx, dz);
-        this.io.to(this.roomCode).emit('player:move', {
-          id, x: player.x, y: 0, z: player.z, rot: player.rot,
-        });
+      // Bots only chase reciprocal targets. Otherwise they patrol spread-out home zones
+      // so the match does not collapse into a bot swarm around one player.
+      let shouldChase = false;
+      if (targetAlive) {
+        const targetTask = this.tasks[target.id];
+        shouldChase = targetTask?.targetId === id;
       }
+
+      let goalX, goalZ, speed;
+
+      if (shouldChase) {
+        const d = Math.hypot(target.x - player.x, target.z - player.z);
+        if (d <= 2) continue;
+        goalX = target.x;
+        goalZ = target.z;
+        speed = CHASE_SPEED;
+      } else {
+        const zone = HOME_ZONES[player.spawnIdx % HOME_ZONES.length];
+        if (
+          !player._wanderGoal ||
+          Math.hypot(player._wanderGoal.x - player.x, player._wanderGoal.z - player.z) < 5 ||
+          player._stuckTicks > 6
+        ) {
+          player._wanderGoal = this._pickBotWanderGoal(zone);
+          player._stuckTicks = 0;
+        }
+        goalX = player._wanderGoal.x;
+        goalZ = player._wanderGoal.z;
+        speed = PATROL_SPEED;
+      }
+
+      const dx   = goalX - player.x;
+      const dz   = goalZ - player.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 1) continue;
+
+      const steer = this._getBotSeparation(id, player);
+      let moveX = (dx / dist) + steer.x;
+      let moveZ = (dz / dist) + steer.z;
+      const moveLen = Math.hypot(moveX, moveZ) || 1;
+      moveX /= moveLen;
+      moveZ /= moveLen;
+
+      const nextX = Math.max(-BOUND, Math.min(BOUND, player.x + moveX * speed * dt));
+      const nextZ = Math.max(-BOUND, Math.min(BOUND, player.z + moveZ * speed * dt));
+      const prevX = player.x;
+      const prevZ = player.z;
+
+      if (!this._botCollides(nextX, player.z)) player.x = nextX;
+      if (!this._botCollides(player.x, nextZ)) player.z = nextZ;
+      const moved = Math.hypot(player.x - prevX, player.z - prevZ);
+      player._stuckTicks = moved < BOT_STUCK_DISTANCE ? (player._stuckTicks || 0) + 1 : 0;
+      player.rot = Math.atan2(dx / dist, dz / dist);
+
+      this.io.to(this.roomCode).emit('player:move', {
+        id, x: player.x, y: 0, z: player.z, rot: player.rot,
+      });
     }
+  }
+
+  _pickBotWanderGoal(zone) {
+    for (let i = 0; i < 12; i++) {
+      const goal = {
+        x: zone.x + (Math.random() - 0.5) * 58,
+        z: zone.z + (Math.random() - 0.5) * 58,
+      };
+      if (!this._botCollides(goal.x, goal.z)) return goal;
+    }
+    return { ...zone };
+  }
+
+  _getBotSeparation(botId, bot) {
+    let sx = 0;
+    let sz = 0;
+    for (const [otherId, other] of this.players) {
+      if (otherId === botId || !this.aliveStatus[otherId]) continue;
+      const dx = bot.x - other.x;
+      const dz = bot.z - other.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist <= 0 || dist > BOT_SEPARATION_RADIUS) continue;
+      const weight = (BOT_SEPARATION_RADIUS - dist) / BOT_SEPARATION_RADIUS;
+      sx += (dx / dist) * weight;
+      sz += (dz / dist) * weight;
+    }
+    return { x: sx * BOT_SEPARATION_STRENGTH, z: sz * BOT_SEPARATION_STRENGTH };
+  }
+
+  _botCollides(x, z) {
+    const col = Math.floor((x - CITY_OFFSET_X + CITY_CELL / 2) / CITY_CELL);
+    const row = Math.floor((z - CITY_OFFSET_Z + CITY_CELL / 2) / CITY_CELL);
+    if (row < 0 || row >= CITY_GRID.length || col < 0 || col >= CITY_GRID[0].length) return false;
+    if (CITY_GRID[row][col] !== 1) return false;
+    const cellMinX = CITY_OFFSET_X + col * CITY_CELL - CITY_CELL / 2;
+    const cellMaxX = cellMinX + CITY_CELL;
+    const cellMinZ = CITY_OFFSET_Z + row * CITY_CELL - CITY_CELL / 2;
+    const cellMaxZ = cellMinZ + CITY_CELL;
+    return (
+      x > cellMinX + BOT_RADIUS && x < cellMaxX - BOT_RADIUS &&
+      z > cellMinZ + BOT_RADIUS && z < cellMaxZ - BOT_RADIUS
+    );
   }
 
   _botTick(botId, delay = 10000) {
