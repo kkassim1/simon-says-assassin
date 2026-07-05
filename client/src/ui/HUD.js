@@ -1,8 +1,9 @@
 import { createSettingsPanel, settingsStore } from './Settings.js';
 
 export class HUD {
-  constructor(container, onLeaveMatch = null) {
+  constructor(container, onLeaveMatch = null, onToggleCameraView = null) {
     this.onLeaveMatch = onLeaveMatch;
+    this.onToggleCameraView = onToggleCameraView;
     this.el = document.createElement('div');
     this.el.id = 'hud';
     this.el.innerHTML = `
@@ -10,6 +11,7 @@ export class HUD {
         <div id="timer-display">⏱ <span id="timer-val">10:00</span></div>
         <div id="score-display">Score: <span id="score-val">0</span></div>
         <div id="wanted-display" style="display:none"></div>
+        <button id="btn-hud-view" title="Toggle camera view">3D</button>
         <button id="btn-hud-menu">☰</button>
         <button id="btn-hud-settings">⚙</button>
         <button id="btn-hud-help">❓</button>
@@ -30,8 +32,8 @@ export class HUD {
           <button id="btn-hud-help-close">✕ Close</button>
           <h3>Controls</h3>
           <div class="instr-cols">
-            <div class="instr-col"><strong>⌨️ Keyboard</strong><ul><li>WASD / Arrows — Move</li><li>E or Space — Act</li><li>Shift — Sprint</li></ul></div>
-            <div class="instr-col"><strong>📱 Mobile</strong><ul><li>Joystick — Move</li><li>ACT — Act</li><li>RUN — Sprint</li></ul></div>
+            <div class="instr-col"><strong>⌨️ Keyboard</strong><ul><li>WASD / Arrows — Move</li><li>E or Space — Act</li><li>Shift — Sprint</li><li>V — Toggle 3D view</li></ul></div>
+            <div class="instr-col"><strong>📱 Mobile</strong><ul><li>Joystick — Move</li><li>ACT — Act</li><li>RUN — Sprint</li><li>3D — Toggle view</li></ul></div>
           </div>
           <h3>Missions</h3>
           <ul>
@@ -84,6 +86,9 @@ export class HUD {
     this.settingsPanel = createSettingsPanel(settingsStore);
     container.appendChild(this.settingsPanel.el);
     this._gameTimerInterval = null;
+    this._unsubscribeSettings = settingsStore.subscribe((settings) => {
+      this.setCameraView(settings.cameraView);
+    });
     this._boundKeyDown = this._onKeyDown.bind(this);
     window.addEventListener('keydown', this._boundKeyDown);
 
@@ -118,6 +123,9 @@ export class HUD {
     this.el.querySelector('#btn-hud-help-close').addEventListener('click', () => {
       this.el.querySelector('#hud-instructions').style.display = 'none';
     });
+    this.el.querySelector('#btn-hud-view').addEventListener('click', () => {
+      this.onToggleCameraView?.();
+    });
   }
 
   toggleMenu() {
@@ -131,6 +139,15 @@ export class HUD {
 
   _onKeyDown(event) {
     if (event.key === 'Escape') this.toggleMenu();
+  }
+
+  setCameraView(view) {
+    const btn = this.el.querySelector('#btn-hud-view');
+    if (!btn) return;
+    const is3d = view === 'thirdPerson';
+    btn.textContent = is3d ? '2D' : '3D';
+    btn.title = is3d ? 'Switch to tactical view' : 'Switch to 3D follow view';
+    btn.classList.toggle('active', is3d);
   }
 
   // ── Game timer ───────────────────────────────────
@@ -315,6 +332,7 @@ export class HUD {
 
   destroy() {
     window.removeEventListener('keydown', this._boundKeyDown);
+    this._unsubscribeSettings?.();
     this.settingsPanel?.destroy();
   }
 }

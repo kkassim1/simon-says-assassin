@@ -53,6 +53,7 @@ export class Game {
     this._animId       = null;
     this._clock        = new THREE.Clock();
     this._respawnTimer = null;
+    this._boundOnKeyDown = null;
 
     this.cops       = new Map();  // copId -> RemotePlayer
     this.traffic    = null;
@@ -114,6 +115,7 @@ export class Game {
       me?.spawnIdx || 0
     );
     if (me) this.player.setPosition(me.x || 0, 0, me.z || 0);
+    this.player.setCameraView(this.settings.cameraView);
 
     for (const p of this._initialPlayers) {
       if (p.id === this.myId) continue;
@@ -128,13 +130,15 @@ export class Game {
       this.sounds.stopAllLoops();
       this.network.leaveRoom();
       this.onLeaveMatch?.();
-    });
+    }, () => this._toggleCameraView());
     this.hud.show();
     this._setupPostProcessing();
     this._unsubscribeSettings = settingsStore.subscribe((settings) => this._applySettings(settings));
 
     this._boundOnResize = this._onResize.bind(this);
+    this._boundOnKeyDown = this._onKeyDown.bind(this);
     window.addEventListener('resize', this._boundOnResize);
+    window.addEventListener('keydown', this._boundOnKeyDown);
     this._setupNetworkListeners();
     this._loop();
   }
@@ -501,14 +505,14 @@ export class Game {
 
         this._updateActionHintAndArrow();
         this._checkVehicleHit();
-        this.player.updateCamera();
+        this.player.updateCamera(delta);
 
       } else {
         if (this.inputHandler.consumeAction()) { /* absorb */ }
-        this._updateSpectatorCam();
+        this._updateSpectatorCam(delta);
       }
     } else {
-      this.player.updateCamera();
+      this.player.updateCamera(delta);
     }
 
     for (const rp of this.remotePlayers.values()) rp.update(delta);
@@ -574,7 +578,7 @@ export class Game {
           const dz = wp.z - this.player.position.z;
           const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
           this.hud.setActionHint(`📍 Patrol: head to ${wp.label} — ${dist}m (${task.currentWaypoint + 1}/${task.waypoints.length})`);
-          this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+          this._setTargetArrow(dx, dz);
           return;
         }
       }
@@ -603,7 +607,7 @@ export class Game {
         const dx = task.locationX - this.player.position.x;
         const dz = task.locationZ - this.player.position.z;
         this.hud.setActionHint(`📦 Bring ${task.targetName} to ${task.locationLabel} — ${Math.round(deliverDist)}m`);
-        this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+        this._setTargetArrow(dx, dz);
       }
       return;
     }
@@ -623,11 +627,11 @@ export class Game {
       this.hud.setActionHint(`${isBounty ? '💰 ' : ''}${task.targetName} — ${Math.round(dist)}m`);
       const dx  = target.group.position.x - this.player.position.x;
       const dz  = target.group.position.z - this.player.position.z;
-      this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+      this._setTargetArrow(dx, dz);
     }
   }
 
-  _updateSpectatorCam() {
+  _updateSpectatorCam(delta) {
     if (!this.specTarget || !this.remotePlayers.get(this.specTarget)?.isAlive) {
       this.specTarget = null;
       for (const [id, rp] of this.remotePlayers) {
@@ -636,9 +640,8 @@ export class Game {
     }
     if (this.specTarget) {
       const pos = this.remotePlayers.get(this.specTarget).group.position;
-      const t   = pos.clone().add(new THREE.Vector3(0, 1, 0));
-      this.player.camera.position.copy(t).add(this.player.cameraOffset);
-      this.player.camera.lookAt(t);
+      const rot = this.remotePlayers.get(this.specTarget).group.rotation.y;
+      this.player.updateCameraAt(pos, rot, delta);
     }
   }
 
@@ -674,12 +677,32 @@ export class Game {
     return Math.sqrt(dx * dx + dz * dz);
   }
 
+  _setTargetArrow(dx, dz) {
+    if (this.settings.cameraView !== 'thirdPerson') {
+      this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+      return;
+    }
+
+    const targetYaw = Math.atan2(dx, dz);
+    const relativeAngle = _angleDiff(this.player.getCameraYaw(), targetYaw);
+    this.hud.setTargetArrow(relativeAngle * (180 / Math.PI));
+  }
+
   _onResize() {
     this.player.camera.aspect = window.innerWidth / window.innerHeight;
     this.player.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.composer?.setSize(window.innerWidth, window.innerHeight);
     this.bloomPass?.resolution.set(window.innerWidth, window.innerHeight);
+  }
+
+  _onKeyDown(event) {
+    if (event.code === 'KeyV' && !event.repeat) this._toggleCameraView();
+  }
+
+  _toggleCameraView() {
+    const next = this.settings.cameraView === 'thirdPerson' ? 'tactical' : 'thirdPerson';
+    settingsStore.update({ cameraView: next });
   }
 
   _setupPostProcessing() {
@@ -707,6 +730,7 @@ export class Game {
       this.bloomPass.strength = quality === 'high' ? 0.45 : 0.28;
       this.bloomPass.radius = quality === 'high' ? 0.35 : 0.2;
     }
+    this.player?.setCameraView(settings.cameraView);
   }
 
   _pixelRatioForQuality(quality) {
@@ -718,6 +742,7 @@ export class Game {
   destroy() {
     cancelAnimationFrame(this._animId);
     window.removeEventListener('resize', this._boundOnResize);
+    window.removeEventListener('keydown', this._boundOnKeyDown);
     if (this._respawnTimer) clearInterval(this._respawnTimer);
     if (this._arrestTimer) clearInterval(this._arrestTimer);
     this._unsubscribeSettings?.();
@@ -736,4 +761,11 @@ export class Game {
       this.container.removeChild(this.hud.el);
     }
   }
+}
+
+function _angleDiff(target, current) {
+  let d = target - current;
+  while (d >  Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
 }

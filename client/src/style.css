@@ -159,6 +159,7 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 
 /* ── HUD HELP BUTTON & IN-GAME INSTRUCTIONS ── */
 #btn-hud-menu,
+#btn-hud-view,
 #btn-hud-help,
 #btn-hud-settings {
   background: rgba(255,255,255,0.1); border: none; color: #fff;
@@ -166,8 +167,18 @@ input::placeholder { color: rgba(255,255,255,0.35); }
   pointer-events: all;
 }
 #btn-hud-menu:hover,
+#btn-hud-view:hover,
 #btn-hud-help:hover,
 #btn-hud-settings:hover { background: rgba(255,255,255,0.2); }
+#btn-hud-view {
+  min-width: 36px;
+  font-weight: 800;
+  color: var(--gold);
+}
+#btn-hud-view.active {
+  background: rgba(241,196,15,0.22);
+  box-shadow: inset 0 0 0 1px rgba(241,196,15,0.4);
+}
 
 #pause-menu {
   position: absolute; inset: 0; z-index: 180;
@@ -222,6 +233,29 @@ input::placeholder { color: rgba(255,255,255,0.35); }
   color: var(--gold);
 }
 #loading-text { color: #ddd; font-size: 0.95rem; font-weight: 700; }
+#loading-text small {
+  display: block;
+  margin-top: 8px;
+  color: #aaa;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+#loading-text code {
+  color: var(--gold);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#loading-retry {
+  align-self: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 18px;
+  background: linear-gradient(135deg, var(--red), #c0392b);
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
 .loading-bar {
   height: 8px; overflow: hidden; border-radius: 999px;
   background: rgba(255,255,255,0.1);

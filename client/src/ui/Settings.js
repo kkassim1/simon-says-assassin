@@ -4,6 +4,7 @@ const DEFAULTS = {
   sfxVolume: 0.8,
   ambientVolume: 0.35,
   graphicsQuality: 'high',
+  cameraView: 'tactical',
 };
 
 const STORAGE_KEY = 'ssa_settings';
@@ -74,6 +75,13 @@ export function createSettingsPanel(store = settingsStore) {
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
+        </select>
+      </label>
+      <label class="setting-row">
+        <span>Camera</span>
+        <select data-setting="cameraView">
+          <option value="tactical">Tactical</option>
+          <option value="thirdPerson">3D Follow</option>
         </select>
       </label>
     </div>
