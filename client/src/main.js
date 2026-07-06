@@ -53,11 +53,12 @@ async function main() {
   });
 
   // Transition from lobby to game on countdown
-  network.on('game:countdown', () => {
-    showLoading('Building city...');
+  network.on('game:countdown', (data) => {
+    const map = data?.map || null;
+    showLoading(map?.name ? `Building ${map.name}...` : 'Building city...');
     lobby.hide();
     requestAnimationFrame(() => {
-      launchGame(latestPlayers, myId, appEl);
+      launchGame(latestPlayers, myId, appEl, map);
       setTimeout(hideLoading, 250);
     });
   });
@@ -68,7 +69,7 @@ async function main() {
   });
 }
 
-function launchGame(players, myId, container) {
+function launchGame(players, myId, container, map = null) {
   if (isMobile) {
     const vi = new VirtualInput();
     inputHandler = vi;
@@ -78,7 +79,7 @@ function launchGame(players, myId, container) {
     inputHandler = new InputHandler();
   }
 
-  game = new Game(network, myId, players, container, returnToLobby);
+  game = new Game(network, myId, players, container, returnToLobby, map);
   game.init(inputHandler);
 }
 

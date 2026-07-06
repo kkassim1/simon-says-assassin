@@ -109,7 +109,7 @@ function humanMaterial(color, roughness = 0.72, metalness = 0.35) {
 
 /**
  * Drives limb rotations each frame.
- * state: 'idle' | 'walk' | 'sprint' | 'drag' | 'captured'
+ * state: 'idle' | 'walk' | 'sprint' | 'drag' | 'captured' | 'hide'
  * punchProgress: 0 = no punch, 0→1 = punch in progress (applied on top of state)
  */
 export function animateCharacter(limbs, animTime, state, punchProgress = 0) {
@@ -154,6 +154,17 @@ export function animateCharacter(limbs, animTime, state, punchProgress = 0) {
       armR.rotation.z = -0.55 - Math.sin(t * 0.7) * 0.1;
       legL.rotation.x =  Math.sin(t * 0.5) * 0.25;
       legR.rotation.x = -Math.sin(t * 0.5) * 0.25;
+      break;
+    }
+    case 'hide': {
+      // Crouched, hugging knees, tiny nervous tremble
+      const t = animTime * 7;
+      legL.rotation.x = 1.05;
+      legR.rotation.x = 1.05;
+      armL.rotation.x = -0.85 + Math.sin(t) * 0.02;
+      armR.rotation.x = -0.85 + Math.sin(t + 0.8) * 0.02;
+      armL.rotation.z =  0.35;
+      armR.rotation.z = -0.35;
       break;
     }
     default: { // idle

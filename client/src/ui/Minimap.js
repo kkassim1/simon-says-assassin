@@ -36,7 +36,11 @@ export class Minimap {
       for (let col = 0; col < cols; col++) {
         const cell = CITY_GRID[row][col];
         if (cell === 1) ctx.fillStyle = '#2e2e3c';
-        else if (cell === 2) ctx.fillStyle = '#1d4a26';
+        else if (cell === 2) ctx.fillStyle = '#1d4a26';      // park
+        else if (cell === 3) ctx.fillStyle = '#6a2a2a';      // stadium
+        else if (cell === 4) ctx.fillStyle = '#7a5a1e';      // construction site
+        else if (cell === 5) ctx.fillStyle = '#4e4e5e';      // monument plaza
+        else if (cell === 6) ctx.fillStyle = '#1c3a6e';      // water
         else continue; // roads stay background color
         ctx.fillRect(col * cw + 0.5, row * ch + 0.5, cw - 1, ch - 1);
       }
@@ -59,8 +63,9 @@ export class Minimap {
    * @param {object} me        { x, z, rot }
    * @param {Array}  cops      [{ x, z }]
    * @param {object|null} waypoint  { x, z } current mission location (drop-off / patrol)
+   * @param {Array}  others    [{ x, z }] revealed players (radar pickup active)
    */
-  update(me, cops = [], waypoint = null) {
+  update(me, cops = [], waypoint = null, others = []) {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, SIZE, SIZE);
     ctx.drawImage(this._base, 0, 0);
@@ -77,6 +82,15 @@ export class Minimap {
       ctx.fillStyle = '#ffce3a';
       ctx.beginPath();
       ctx.arc(wx, wy, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Radar-revealed players (red dots)
+    ctx.fillStyle = '#ff5555';
+    for (const o of others) {
+      const [ox, oy] = this._toMap(o.x, o.z);
+      ctx.beginPath();
+      ctx.arc(ox, oy, 2.6, 0, Math.PI * 2);
       ctx.fill();
     }
 

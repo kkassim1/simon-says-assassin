@@ -35,6 +35,7 @@ export class HUD {
           <div class="instr-cols">
             <div class="instr-col"><strong>⌨️ Keyboard</strong><ul><li>WASD / Arrows — Move</li><li>E or Space — Act</li><li>Shift — Sprint</li><li>V — Toggle 3D view</li></ul></div>
             <div class="instr-col"><strong>📱 Mobile</strong><ul><li>Joystick — Move</li><li>ACT — Act</li><li>RUN — Sprint</li><li>3D — Toggle view</li></ul></div>
+            <div class="instr-col"><strong>🎮 Controller</strong><ul><li>Left stick / D-pad — Move</li><li>A or X — Act</li><li>RT / LT / B — Sprint</li><li>Y — Toggle view · Start — Menu</li></ul></div>
           </div>
           <h3>Missions</h3>
           <ul>
@@ -49,6 +50,9 @@ export class HUD {
             <li>💰 Bounty on top player — kill for +200</li>
             <li>🚔 Cop chases bounty player — 30s arrest if caught</li>
             <li>Mash Act to escape a kidnap</li>
+            <li>🕶️ Walk to stay disguised — sprinting/attacking reveals your name</li>
+            <li>🫥 Stand still by park trees, plaza planters, or the sand pile to HIDE — cops and hunters lose you</li>
+            <li>⚡📡💰 Grab pickups on roads: speed boost, radar ping, cash</li>
           </ul>
         </div>
       </div>
@@ -58,6 +62,7 @@ export class HUD {
       </div>
       <div id="ally-info" style="display:none"></div>
       <div id="bounty-banner" style="display:none">💰 BOUNTY on YOU — 🚔 COP IS COMING!</div>
+      <div id="hidden-badge" style="display:none">🫥 HIDDEN</div>
       <div id="simon-banner"></div>
       <div id="task-box">
         <div id="task-icon">🎯</div>
@@ -332,8 +337,14 @@ export class HUD {
   show() { this.el.style.display = 'block'; }
   hide() { this.el.style.display = 'none'; }
 
-  updateMinimap(me, cops, waypoint) {
-    this.minimap?.update(me, cops, waypoint);
+  setHiddenBadge(text) {
+    const el = this.el.querySelector('#hidden-badge');
+    el.style.display = text ? 'block' : 'none';
+    if (text) el.textContent = text;
+  }
+
+  updateMinimap(me, cops, waypoint, others) {
+    this.minimap?.update(me, cops, waypoint, others);
   }
 
   destroy() {

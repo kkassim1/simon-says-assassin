@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { generateTaskForPlayer, KIDNAP_LOCATIONS } from './SimonAI.js';
+import { generateTaskForPlayer } from './SimonAI.js';
+import { MAPS, pickRandomMap, computeSpawnPoints, hideSpotsFromGrid, CELL as CITY_CELL } from './maps.js';
 
 const LOBBY_COUNTDOWN = 5;
 const GAME_DURATION   = 600;   // 10 minutes
@@ -20,27 +21,19 @@ const BOT_SEPARATION_RADIUS = 9;
 const BOT_SEPARATION_STRENGTH = 0.65;
 const BOT_STUCK_DISTANCE = 0.35;
 
-const CITY_GRID = [
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  [1, 2, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 2, 0, 1],
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  [1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 2, 1, 0, 1],
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  [1, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 0, 1, 1, 0, 1],
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  [1, 1, 0, 1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 1],
-  [2, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 2],
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-];
-const CITY_CELL = 20;
-const CITY_OFFSET_X = -(CITY_GRID[0].length * CITY_CELL) / 2 + CITY_CELL / 2;
-const CITY_OFFSET_Z = -(CITY_GRID.length * CITY_CELL) / 2 + CITY_CELL / 2;
+const PICKUP_TYPES = ['speed', 'radar', 'points'];
+const PICKUP_MAX_ACTIVE   = 6;
+const PICKUP_SPAWN_MS     = 9000;
+const PICKUP_COLLECT_RANGE = 6;   // generous for latency (client triggers at ~2.5)
+const PICKUP_POINTS_VALUE = 100;
+const PICKUP_EFFECT_SECS  = 8;
+
+// Hiding: must be ~still in a hide spot; runs out after HIDE_DURATION and
+// needs HIDE_COOLDOWN before it works again.
+// NOTE: timings mirrored in client/src/game/Game.js + RemotePlayer.js.
+const HIDE_MAX_SPEED   = 2;     // world units/sec
+const HIDE_DURATION_MS = 7000;
+const HIDE_COOLDOWN_MS = 8000;
 
 const PLAYER_COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
@@ -48,16 +41,6 @@ const PLAYER_COLORS = [
 ];
 const PLAYER_NAMES  = ['Ghost', 'Viper', 'Raven', 'Cobra', 'Shade', 'Frost', 'Dagger', 'Storm'];
 
-const SPAWN_POINTS = [
-  { x:  10, z:  30 },  // road col x=10, clear of building block [20,40]x[20,40]
-  { x: -22, z:  22 },  // park cell — no collision box
-  { x:  10, z: -30 },  // road col x=10, clear of building block [20,40]x[-40,-20]
-  { x: -50, z: -30 },  // road col x=-50, clear of building block [-40,-20]x[-40,-20]
-  { x:  65, z:   0 },
-  { x: -65, z:   0 },
-  { x:   0, z:  65 },
-  { x:   0, z: -65 },
-];
 
 export class GameRoom {
   constructor(io, roomCode, onDestroy) {
@@ -85,6 +68,21 @@ export class GameRoom {
     this.escapeAttempts  = {};          // victimId -> attempt count
     this._botMoveInterval = null;
     this._lastVehicleHit = {};
+
+    this.pickups = new Map();       // pickupId -> { id, x, z, type }
+    this._pickupInterval = null;
+    this._pickupSeq = 0;
+
+    this._applyMap(MAPS[0]);        // lobby default; startGame re-rolls
+  }
+
+  _applyMap(map) {
+    this.map = map;
+    this.grid = map.grid;
+    this.gridOffsetX = -(map.grid[0].length * CITY_CELL) / 2 + CITY_CELL / 2;
+    this.gridOffsetZ = -(map.grid.length * CITY_CELL) / 2 + CITY_CELL / 2;
+    this.spawnPoints = computeSpawnPoints(map.grid);
+    this.hideSpots = hideSpotsFromGrid(map.grid);
   }
 
   // ── Lobby ────────────────────────────────────────
@@ -97,7 +95,8 @@ export class GameRoom {
       name: playerName || PLAYER_NAMES[Math.floor(Math.random() * PLAYER_NAMES.length)],
       color: PLAYER_COLORS[idx % PLAYER_COLORS.length],
       spawnIdx: idx,
-      x: SPAWN_POINTS[idx].x, y: 0, z: SPAWN_POINTS[idx].z,
+      x: this.spawnPoints[idx % this.spawnPoints.length].x, y: 0,
+      z: this.spawnPoints[idx % this.spawnPoints.length].z,
       rot: 0, isBot: false,
     };
     this.players.set(socket.id, player);
@@ -155,8 +154,12 @@ export class GameRoom {
   startGame() {
     if (this.state !== 'lobby') return;
     this.state = 'countdown';
+    this._applyMap(pickRandomMap());
     this._fillBots();
-    this.io.to(this.roomCode).emit('game:countdown', { seconds: LOBBY_COUNTDOWN });
+    this.io.to(this.roomCode).emit('game:countdown', {
+      seconds: LOBBY_COUNTDOWN,
+      map: { id: this.map.id, name: this.map.name, grid: this.map.grid, locations: this.map.locations },
+    });
     setTimeout(() => this._startContinuous(), LOBBY_COUNTDOWN * 1000);
   }
 
@@ -170,8 +173,8 @@ export class GameRoom {
         name: PLAYER_NAMES[Math.floor(Math.random() * PLAYER_NAMES.length)],
         color: PLAYER_COLORS[idx % PLAYER_COLORS.length],
         spawnIdx: idx,
-        x: SPAWN_POINTS[idx % SPAWN_POINTS.length].x, y: 0,
-        z: SPAWN_POINTS[idx % SPAWN_POINTS.length].z,
+        x: this.spawnPoints[idx % this.spawnPoints.length].x, y: 0,
+        z: this.spawnPoints[idx % this.spawnPoints.length].z,
         rot: 0, isBot: true,
       });
       this.scores[botId] = 0;
@@ -186,7 +189,7 @@ export class GameRoom {
       this.capturedStatus[p.id] = null;
       this.playerHp[p.id]       = MAX_HP;
       this.wantedLevel[p.id]    = 0;
-      const sp = SPAWN_POINTS[p.spawnIdx % SPAWN_POINTS.length];
+      const sp = this.spawnPoints[p.spawnIdx % this.spawnPoints.length];
       p.x = sp.x; p.z = sp.z;
     }
 
@@ -217,6 +220,7 @@ export class GameRoom {
     });
 
     this._startBotAI();
+    this._startPickups();
     this.gameTimer = setTimeout(() => this.endGame(), GAME_DURATION * 1000);
   }
 
@@ -226,6 +230,16 @@ export class GameRoom {
     const p = this.players.get(socketId);
     if (!p || this.state !== 'playing') return;
     if (this.arrestedPlayers[socketId]) return;
+
+    // Track speed (for hiding: you must be nearly still to stay hidden)
+    const now = Date.now();
+    if (p._lastMoveAt) {
+      const dt = Math.max(0.02, (now - p._lastMoveAt) / 1000);
+      const moved = Math.hypot(data.x - p.x, data.z - p.z);
+      p._speed = (p._speed || 0) * 0.6 + (moved / dt) * 0.4;
+    }
+    p._lastMoveAt = now;
+
     p.x = data.x; p.y = data.y; p.z = data.z; p.rot = data.rot;
     this.io.to(this.roomCode).emit('player:move', { id: socketId, x: p.x, y: p.y, z: p.z, rot: p.rot });
 
@@ -516,7 +530,7 @@ export class GameRoom {
       this.wantedLevel[playerId] = Math.max(0, (this.wantedLevel[playerId] || 0) - 1);
 
       const p  = this.players.get(playerId);
-      const sp = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)];
+      const sp = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
       if (p) { p.x = sp.x; p.z = sp.z; }
 
       this.io.to(this.roomCode).emit('player:respawn', {
@@ -549,10 +563,10 @@ export class GameRoom {
     if (player?.isBot) {
       const realAlive = pool.filter(p => !p.isBot);
       if (realAlive.length > 0 && Math.random() < 0.5) {
-        return generateTaskForPlayer(player, realAlive);
+        return generateTaskForPlayer(player, realAlive, this.map.locations);
       }
     }
-    return generateTaskForPlayer(player, pool);
+    return generateTaskForPlayer(player, pool, this.map.locations);
   }
 
   _assignNewTask(playerId) {
@@ -564,6 +578,34 @@ export class GameRoom {
       playerId, task,
       playerName: this.players.get(playerId)?.name,
     });
+  }
+
+  // ── Hiding ───────────────────────────────────────
+
+  // A player is hidden when nearly still inside a hide spot (park trees,
+  // plaza planters, the construction sand pile). Cops and bot hunters lose
+  // track of hidden players.
+  _isHidden(p) {
+    if (!p || p.isBot) return false;
+
+    let inSpot = false;
+    if ((p._speed || 0) <= HIDE_MAX_SPEED) {
+      for (const s of this.hideSpots) {
+        const dx = p.x - s.x, dz = p.z - s.z;
+        if (dx * dx + dz * dz < s.r * s.r) { inSpot = true; break; }
+      }
+    }
+
+    const now = Date.now();
+    if (!inSpot) { p._hideStart = null; return false; }
+    if (p._hideCooldownUntil && now < p._hideCooldownUntil) return false;
+    if (!p._hideStart) p._hideStart = now;
+    if (now - p._hideStart > HIDE_DURATION_MS) {
+      p._hideStart = null;
+      p._hideCooldownUntil = now + HIDE_COOLDOWN_MS;
+      return false;
+    }
+    return true;
   }
 
   // ── Helpers ──────────────────────────────────────
@@ -603,6 +645,68 @@ export class GameRoom {
     }
   }
 
+  // ── Pickups ──────────────────────────────────────
+
+  _startPickups() {
+    this._stopPickups();
+    this._pickupInterval = setInterval(() => this._spawnPickup(), PICKUP_SPAWN_MS);
+    // Seed a few immediately so the map isn't empty at kickoff
+    for (let i = 0; i < 3; i++) this._spawnPickup();
+  }
+
+  _stopPickups() {
+    if (this._pickupInterval) { clearInterval(this._pickupInterval); this._pickupInterval = null; }
+    this.pickups.clear();
+  }
+
+  _spawnPickup() {
+    if (this.state !== 'playing' || this.pickups.size >= PICKUP_MAX_ACTIVE) return;
+
+    // Pick a random road cell and jitter within it
+    let x = 0, z = 0;
+    for (let tries = 0; tries < 20; tries++) {
+      const row = Math.floor(Math.random() * this.grid.length);
+      const col = Math.floor(Math.random() * this.grid[0].length);
+      if (this.grid[row][col] !== 0) continue;
+      x = this.gridOffsetX + col * CITY_CELL + (Math.random() - 0.5) * (CITY_CELL - 6);
+      z = this.gridOffsetZ + row * CITY_CELL + (Math.random() - 0.5) * (CITY_CELL - 6);
+      break;
+    }
+
+    const type = PICKUP_TYPES[Math.floor(Math.random() * PICKUP_TYPES.length)];
+    const id = `pk_${this._pickupSeq++}`;
+    const pickup = { id, x, z, type };
+    this.pickups.set(id, pickup);
+    this.io.to(this.roomCode).emit('pickup:spawned', pickup);
+  }
+
+  collectPickup(playerId, pickupId) {
+    if (this.state !== 'playing' || !this.aliveStatus[playerId]) return;
+    if (this.arrestedPlayers[playerId] || this.capturedStatus[playerId]) return;
+    const pickup = this.pickups.get(pickupId);
+    const player = this.players.get(playerId);
+    if (!pickup || !player) return;
+
+    const dx = player.x - pickup.x, dz = player.z - pickup.z;
+    if (Math.sqrt(dx * dx + dz * dz) > PICKUP_COLLECT_RANGE) return;
+
+    this.pickups.delete(pickupId);
+    this.io.to(this.roomCode).emit('pickup:removed', { id: pickupId, byId: playerId });
+
+    if (pickup.type === 'points') {
+      this.scores[playerId] = (this.scores[playerId] || 0) + PICKUP_POINTS_VALUE;
+      this.io.to(this.roomCode).emit('game:event', {
+        type: 'pickup', actorId: playerId,
+        message: `${player.name} grabbed a cash stash! +${PICKUP_POINTS_VALUE} pts`,
+        scores: this.scores,
+      });
+    } else {
+      this.io.to(playerId).emit('pickup:effect', {
+        type: pickup.type, duration: PICKUP_EFFECT_SECS,
+      });
+    }
+  }
+
   // ── Cop AI ───────────────────────────────────────
 
   _spawnCop(targetId) {
@@ -638,13 +742,28 @@ export class GameRoom {
         continue;
       }
 
-      const dx = target.x - cop.x;
-      const dz = target.z - cop.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-
-      if (dist < COP_CATCH_RANGE) {
-        this._arrestPlayer(cop.targetId, copId);
+      // Hidden target: the cop only knows the last position it saw them at.
+      // It walks there and loiters — step out (or move) and the chase resumes.
+      let goalX, goalZ;
+      if (this._isHidden(target)) {
+        goalX = cop.lastSeenX ?? cop.x;
+        goalZ = cop.lastSeenZ ?? cop.z;
       } else {
+        cop.lastSeenX = target.x;
+        cop.lastSeenZ = target.z;
+        goalX = target.x;
+        goalZ = target.z;
+      }
+
+      const dx = goalX - cop.x;
+      const dz = goalZ - cop.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const canCatch = !this._isHidden(target) &&
+        Math.hypot(target.x - cop.x, target.z - cop.z) < COP_CATCH_RANGE;
+
+      if (canCatch) {
+        this._arrestPlayer(cop.targetId, copId);
+      } else if (dist > 1) {
         cop.x += (dx / dist) * COP_SPEED * dt;
         cop.z += (dz / dist) * COP_SPEED * dt;
         this.io.to(this.roomCode).emit('cop:move', { copId, x: cop.x, z: cop.z });
@@ -726,7 +845,7 @@ export class GameRoom {
       // Bots only chase reciprocal targets. Otherwise they patrol spread-out home zones
       // so the match does not collapse into a bot swarm around one player.
       let shouldChase = false;
-      if (targetAlive) {
+      if (targetAlive && !this._isHidden(target)) {
         const targetTask = this.tasks[target.id];
         shouldChase = targetTask?.targetId === id;
       }
@@ -811,13 +930,14 @@ export class GameRoom {
   }
 
   _botCollides(x, z) {
-    const col = Math.floor((x - CITY_OFFSET_X + CITY_CELL / 2) / CITY_CELL);
-    const row = Math.floor((z - CITY_OFFSET_Z + CITY_CELL / 2) / CITY_CELL);
-    if (row < 0 || row >= CITY_GRID.length || col < 0 || col >= CITY_GRID[0].length) return false;
-    if (CITY_GRID[row][col] !== 1) return false;
-    const cellMinX = CITY_OFFSET_X + col * CITY_CELL - CITY_CELL / 2;
+    const col = Math.floor((x - this.gridOffsetX + CITY_CELL / 2) / CITY_CELL);
+    const row = Math.floor((z - this.gridOffsetZ + CITY_CELL / 2) / CITY_CELL);
+    if (row < 0 || row >= this.grid.length || col < 0 || col >= this.grid[0].length) return false;
+    const v = this.grid[row][col];
+    if (v !== 1 && v !== 6) return false;   // buildings and water block
+    const cellMinX = this.gridOffsetX + col * CITY_CELL - CITY_CELL / 2;
     const cellMaxX = cellMinX + CITY_CELL;
-    const cellMinZ = CITY_OFFSET_Z + row * CITY_CELL - CITY_CELL / 2;
+    const cellMinZ = this.gridOffsetZ + row * CITY_CELL - CITY_CELL / 2;
     const cellMaxZ = cellMinZ + CITY_CELL;
     return (
       x > cellMinX + BOT_RADIUS && x < cellMaxX - BOT_RADIUS &&
@@ -867,6 +987,7 @@ export class GameRoom {
     this.state = 'ended';
     clearTimeout(this.gameTimer);
     this._despawnAllCops();
+    this._stopPickups();
     if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
 
     const sorted = Array.from(this.players.values())
@@ -885,6 +1006,7 @@ export class GameRoom {
 
     clearTimeout(this.gameTimer);
     this._despawnAllCops();
+    this._stopPickups();
     if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
 
     // Remove bots
@@ -914,6 +1036,7 @@ export class GameRoom {
     clearTimeout(this.gameTimer);
     if (this._endCleanupTimer) { clearTimeout(this._endCleanupTimer); this._endCleanupTimer = null; }
     this._despawnAllCops();
+    this._stopPickups();
     if (this._botMoveInterval) { clearInterval(this._botMoveInterval); this._botMoveInterval = null; }
     this._onDestroy?.();
   }

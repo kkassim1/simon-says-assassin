@@ -27,6 +27,7 @@ export class PlayerController {
     this.isAlive   = true;
     this.isCaptured = false;
     this.isDragging = false;
+    this.speedMultiplier = 1;   // pickup boosts
 
     this._animTime   = 0;
     this._punchTimer = 0;
@@ -72,6 +73,23 @@ export class PlayerController {
     this.actionRing.material.opacity = visible ? 0.8 : 0;
   }
 
+  setHiddenVisual(hidden) {
+    if (this._hiddenVisual === hidden) return;
+    this._hiddenVisual = hidden;
+    if (!this._bodyMats) {
+      this._bodyMats = [];
+      this.group.traverse((obj) => {
+        if (obj.isMesh && obj !== this.actionRing) {
+          this._bodyMats.push({ mat: obj.material, wasTransparent: obj.material.transparent });
+        }
+      });
+    }
+    for (const { mat, wasTransparent } of this._bodyMats) {
+      mat.transparent = hidden || wasTransparent;
+      mat.opacity = hidden ? 0.35 : 1;
+    }
+  }
+
   update(delta, input, isSprinting) {
     if (!this.isAlive || this.isCaptured) {
       if (this.isCaptured && this._limbs) {
@@ -81,7 +99,7 @@ export class PlayerController {
       return;
     }
 
-    const speed = SPEED * (isSprinting ? SPRINT_MULT : 1);
+    const speed = SPEED * (isSprinting ? SPRINT_MULT : 1) * this.speedMultiplier;
     const targetInput = this._inputToWorld(input);
     this._smoothedInput.lerp(targetInput, _dampAlpha(MOVEMENT_INPUT_DAMPING, delta));
 
@@ -108,6 +126,10 @@ export class PlayerController {
     this.group.rotation.y = this._visualRotation;
     this.group.position.copy(this.position);
 
+    // Crouch when hiding: whole body ducks down
+    const targetScaleY = this._hiddenVisual ? 0.62 : 1;
+    this.group.scale.y += (targetScaleY - this.group.scale.y) * _dampAlpha(10, delta);
+
     // Animation
     if (this._limbs) {
       this._animTime += delta;
@@ -116,6 +138,7 @@ export class PlayerController {
       let state = 'idle';
       if (this.isDragging) state = 'drag';
       else if (moving) state = isSprinting ? 'sprint' : 'walk';
+      else if (this._hiddenVisual) state = 'hide';
 
       const punch = this._punchTimer > 0
         ? 1 - this._punchTimer / PUNCH_DURATION

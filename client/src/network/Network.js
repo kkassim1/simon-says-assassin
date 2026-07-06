@@ -95,6 +95,10 @@ export class Network {
     this.socket.emit('action:break_free');
   }
 
+  sendPickupCollect(pickupId) {
+    this.socket.emit('action:pickup', { pickupId });
+  }
+
   sendVehicleHit(vehicleId) {
     this.socket.emit('action:vehicle_hit', { vehicleId });
   }

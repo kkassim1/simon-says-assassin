@@ -1,20 +1,23 @@
 import * as THREE from 'three';
 
-// 16×16 grid layout: 0=road, 1=building block, 2=park
+// 16×16 grid layout: 0=road, 1=building block, 2=park,
+// 3=stadium, 4=construction site, 5=monument plaza, 6=water
+// Default layout only — the server sends the actual map grid at game start
+// (see server/src/maps.js); setCityGrid() swaps it in before buildCity().
 const CITY_GRID = [
   [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1], // 0
   [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1], // 1
   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 2
-  [1, 2, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 2, 0, 1], // 3
+  [1, 5, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 2, 0, 1], // 3
   [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1], // 4
   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 5
-  [1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 2, 1, 0, 1], // 6
+  [1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 4, 1, 0, 1], // 6
   [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1], // 7
   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 8
   [1, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 0, 1, 1, 0, 1], // 9
   [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1], // 10
   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 11
-  [1, 1, 0, 1, 1, 0, 1, 2, 0, 1, 1, 0, 1, 1, 0, 1], // 12
+  [1, 1, 0, 1, 1, 0, 1, 3, 0, 1, 1, 0, 1, 1, 0, 1], // 12
   [2, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 2], // 13
   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 14
   [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1], // 15
@@ -22,10 +25,76 @@ const CITY_GRID = [
 
 const CELL = 20;
 
+// Mutates CITY_GRID in place so existing importers (TrafficSystem, Minimap)
+// see the server-selected map without changing their imports.
+export function setCityGrid(grid) {
+  if (!Array.isArray(grid) || !grid.length) return;
+  CITY_GRID.length = 0;
+  for (const row of grid) CITY_GRID.push([...row]);
+}
+
+// Hide spots derived from the grid — MUST match server/src/maps.js
+// (parks: tree corners; plaza: planters; construction: sand pile).
+export function hideSpotsFromGrid(grid = CITY_GRID) {
+  const offX = -(grid[0].length * CELL) / 2 + CELL / 2;
+  const offZ = -(grid.length * CELL) / 2 + CELL / 2;
+  const spots = [];
+  for (let row = 0; row < grid.length; row++) {
+    for (let col = 0; col < grid[0].length; col++) {
+      const v = grid[row][col];
+      const cx = offX + col * CELL;
+      const cz = offZ + row * CELL;
+      if (v === 2) {
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          spots.push({ x: cx + sx * 4.68, z: cz + sz * 4.68, r: 2.4 });
+        }
+      } else if (v === 5) {
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          spots.push({ x: cx + sx * 8, z: cz + sz * 8, r: 2.2 });
+        }
+      } else if (v === 4) {
+        spots.push({ x: cx + 4, z: cz - 5, r: 2.6 });
+      }
+    }
+  }
+  return spots;
+}
+
+// ── Procedural surface textures (cheap noise, generated once) ───────────────
+function _makeNoiseTexture(baseHex, variation, repeat, speckles = 0) {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(baseHex);
+  ctx.fillStyle = `#${base.getHexString()}`;
+  ctx.fillRect(0, 0, size, size);
+
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 2 * variation * 255;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Larger speckles (cracks / pebbles / grass blades)
+  for (let i = 0; i < speckles; i++) {
+    const shade = Math.random() > 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.14)';
+    ctx.fillStyle = shade;
+    ctx.fillRect(Math.random() * size, Math.random() * size, 1 + Math.random() * 3, 1 + Math.random() * 3);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  return tex;
+}
+
 // ── Shared materials (created once) ─────────────────────────────────────────
 const MAT_GROUND    = new THREE.MeshLambertMaterial({ color: 0x0d0d14 });
-const MAT_ROAD      = new THREE.MeshLambertMaterial({ color: 0x191920 });
-const MAT_SIDEWALK  = new THREE.MeshLambertMaterial({ color: 0x36363f });
+const MAT_ROAD      = new THREE.MeshLambertMaterial({ color: 0x2b2b33, map: _makeNoiseTexture(0x9a9aa4, 0.07, 5, 90) });
+const MAT_SIDEWALK  = new THREE.MeshLambertMaterial({ color: 0x45454f, map: _makeNoiseTexture(0xbdbdc6, 0.05, 6, 50) });
 const MAT_MARK_Y    = new THREE.MeshLambertMaterial({ color: 0xdba800 });
 const MAT_MARK_W    = new THREE.MeshLambertMaterial({ color: 0xbbbbbb });
 const MAT_POLE      = new THREE.MeshLambertMaterial({ color: 0x6a6a78 });
@@ -36,7 +105,21 @@ const MAT_DUMP_LID  = new THREE.MeshLambertMaterial({ color: 0x223a2a });
 const MAT_WOOD      = new THREE.MeshLambertMaterial({ color: 0x6b4a2a });
 const MAT_METAL     = new THREE.MeshLambertMaterial({ color: 0x4a4a5a });
 const MAT_GREY_ROOF = new THREE.MeshLambertMaterial({ color: 0x333342 });
-const MAT_GRASS     = new THREE.MeshLambertMaterial({ color: 0x1a4020 });
+const MAT_GRASS     = new THREE.MeshLambertMaterial({ color: 0x1e4a24, map: _makeNoiseTexture(0xa8c8a0, 0.09, 7, 120) });
+const MAT_FIELD     = new THREE.MeshLambertMaterial({ color: 0x1c5a28, map: _makeNoiseTexture(0xa8c8a0, 0.07, 5, 80) });
+const MAT_DIRT      = new THREE.MeshLambertMaterial({ color: 0x4a3320, map: _makeNoiseTexture(0xc0a080, 0.1, 5, 100) });
+const MAT_PLAZA     = new THREE.MeshLambertMaterial({ color: 0x4a4a56, map: _makeNoiseTexture(0xc4c4ce, 0.04, 8, 30) });
+const MAT_BLEACHER  = new THREE.MeshLambertMaterial({ color: 0x37374a, side: THREE.DoubleSide });
+const MAT_BLEACH_TOP = new THREE.MeshLambertMaterial({ color: 0x8a2f2f, side: THREE.DoubleSide });
+const MAT_STEEL     = new THREE.MeshLambertMaterial({ color: 0xb3552a });
+const MAT_CRANE     = new THREE.MeshLambertMaterial({ color: 0xd8b420 });
+const MAT_CONE      = new THREE.MeshLambertMaterial({ color: 0xe86f1a, emissive: new THREE.Color(0x3a1500) });
+const MAT_BARRIER   = new THREE.MeshLambertMaterial({ color: 0xcccccc });
+const MAT_MONUMENT  = new THREE.MeshLambertMaterial({ color: 0x6a6a7a });
+const MAT_GOLD      = new THREE.MeshLambertMaterial({ color: 0xd4af37, emissive: new THREE.Color(0x553f08) });
+const MAT_FLOOD     = new THREE.MeshBasicMaterial({ color: 0xf4f4ff });
+const MAT_WATER     = new THREE.MeshLambertMaterial({ color: 0x1a3a7a, transparent: true, opacity: 0.85 });
+const MAT_EMBANK    = new THREE.MeshLambertMaterial({ color: 0x3c3c48 });
 const MAT_PARK_PATH = new THREE.MeshLambertMaterial({ color: 0x3a3028 });
 const MAT_FOUNTAIN  = new THREE.MeshLambertMaterial({ color: 0x4a4a5a });
 const MAT_F_WATER   = new THREE.MeshLambertMaterial({ color: 0x2244aa, transparent: true, opacity: 0.7 });
@@ -50,17 +133,68 @@ const MAT_WALL      = new THREE.MeshLambertMaterial({ color: 0x12121e });
 const MAT_HELIPAD   = new THREE.MeshLambertMaterial({ color: 0x222230 });
 const MAT_HELI_H    = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: new THREE.Color(0x444444) });
 
-// Building style palettes
-const STYLE_PALETTES = [
-  // 0: Glass tower – dark teal, tall, blue windows
-  { colors: [0x0d2233, 0x1a3a4c, 0x0a1826], heightMult: 1.7, win: 'blue' },
-  // 1: Brick brownstone – warm reds, medium, yellow windows
-  { colors: [0x6b2f1a, 0x7d3820, 0x5a2010], heightMult: 0.75, win: 'yellow' },
-  // 2: Concrete block – greys, mixed
-  { colors: [0x2a2a34, 0x363640, 0x222230], heightMult: 1.0, win: 'mixed' },
-  // 3: Neon district – deep purple, neon windows + signs
-  { colors: [0x1a0a2e, 0x251040, 0x120820], heightMult: 1.1, win: 'neon' },
-];
+// ── Per-map visual themes ────────────────────────────────────────────────────
+// Selected by map id (server picks the map). Each theme swaps building
+// palettes, neon density, surface tints, and the day/night lighting palette.
+const THEMES = {
+  downtown: {
+    palettes: [
+      { colors: [0x0d2233, 0x1a3a4c, 0x0a1826], heightMult: 1.7, win: 'blue' },   // glass towers
+      { colors: [0x6b2f1a, 0x7d3820, 0x5a2010], heightMult: 0.75, win: 'yellow' }, // brownstone
+      { colors: [0x2a2a34, 0x363640, 0x222230], heightMult: 1.0, win: 'mixed' },   // concrete
+      { colors: [0x1a0a2e, 0x251040, 0x120820], heightMult: 1.1, win: 'neon' },    // neon district
+    ],
+    neonScale: 1,
+    ground: 0x0d0d14, road: 0x2b2b33, sidewalk: 0x45454f, grass: 0x1e4a24,
+    dayNight: {
+      day:   { sky: 0x1a2240, ambient: 0x6688bb, ambientIntensity: 1.2, sun: 0xffd5a0, sunIntensity: 1.4, fill: 0.5 },
+      night: { sky: 0x05060f, ambient: 0x223355, ambientIntensity: 0.45, sun: 0x99aaff, sunIntensity: 0.3, fill: 0.15 },
+    },
+  },
+  riverside: {
+    palettes: [
+      { colors: [0x3a4048, 0x2e3540, 0x46505a], heightMult: 0.7, win: 'mixed' },   // steel warehouses
+      { colors: [0x7a3520, 0x8a4228, 0x63301c], heightMult: 0.85, win: 'yellow' }, // dockside brick
+      { colors: [0x8a7a5a, 0x9a8a68, 0x77684c], heightMult: 0.6, win: 'yellow' },  // stucco rowhouses
+      { colors: [0x1d3a4a, 0x255062, 0x16303e], heightMult: 1.35, win: 'blue' },   // harbor offices
+    ],
+    neonScale: 0.35,
+    ground: 0x14100e, road: 0x33323a, sidewalk: 0x565058, grass: 0x3a4a1e,
+    dayNight: {
+      day:   { sky: 0x7a4636, ambient: 0xcc8866, ambientIntensity: 1.1, sun: 0xff9955, sunIntensity: 1.5, fill: 0.4 },
+      night: { sky: 0x0a0812, ambient: 0x2a2244, ambientIntensity: 0.5, sun: 0x8899dd, sunIntensity: 0.3, fill: 0.15 },
+    },
+  },
+  'grand-park': {
+    palettes: [
+      { colors: [0xcfc4a6, 0xbfb090, 0xd8cfb8], heightMult: 0.55, win: 'mixed' },  // cream townhouses
+      { colors: [0xb06a4a, 0xc07a55, 0x9a5a3e], heightMult: 0.6, win: 'yellow' },  // terracotta
+      { colors: [0x7a8a6a, 0x8a9a78, 0x6a7a5c], heightMult: 0.6, win: 'mixed' },   // sage
+      { colors: [0x6a86a0, 0x7a96b2, 0x5a7690], heightMult: 0.95, win: 'blue' },   // powder-blue flats
+    ],
+    neonScale: 0.1,
+    ground: 0x22301e, road: 0x3c3c42, sidewalk: 0x6a6a70, grass: 0x2a6a2c,
+    dayNight: {
+      day:   { sky: 0x7fa8d8, ambient: 0x9ab0d0, ambientIntensity: 1.5, sun: 0xfff0d0, sunIntensity: 1.7, fill: 0.6 },
+      night: { sky: 0x0c1226, ambient: 0x2c3c5c, ambientIntensity: 0.55, sun: 0xaabbee, sunIntensity: 0.35, fill: 0.2 },
+    },
+  },
+};
+
+let ACTIVE_THEME = THEMES.downtown;
+
+export function setCityTheme(mapId) {
+  ACTIVE_THEME = THEMES[mapId] || THEMES.downtown;
+  MAT_GROUND.color.setHex(ACTIVE_THEME.ground);
+  MAT_ROAD.color.setHex(ACTIVE_THEME.road);
+  MAT_SIDEWALK.color.setHex(ACTIVE_THEME.sidewalk);
+  MAT_GRASS.color.setHex(ACTIVE_THEME.grass);
+  MAT_FIELD.color.setHex(ACTIVE_THEME.grass).offsetHSL(0, 0.05, 0.03);
+}
+
+export function getCityTheme() {
+  return ACTIVE_THEME;
+}
 
 const NEON_COLORS = [0xff1493, 0x00ffff, 0xff6600, 0x8800ff, 0xff0044, 0x00ff88, 0xff88ff];
 
@@ -127,11 +261,20 @@ export function buildCity(scene) {
         sw.position.set(wx, 0.02, wz);
         sw.receiveShadow = true;
         group.add(sw);
-        addBuildingCluster(group, wx, wz, CELL);
+        // Per-building collision boxes: gaps between buildings are walkable alleys
+        boxes.push(...addBuildingCluster(group, wx, wz, CELL));
         addSidewalkProps(group, wx, wz, CELL);
-        boxes.push({ minX: wx - CELL / 2, maxX: wx + CELL / 2, minZ: wz - CELL / 2, maxZ: wz + CELL / 2 });
       } else if (cell === 2) {
         addPark(group, wx, wz, CELL);
+      } else if (cell === 3) {
+        addStadium(group, wx, wz, CELL);
+      } else if (cell === 4) {
+        addConstructionSite(group, wx, wz, CELL);
+      } else if (cell === 5) {
+        addPlaza(group, wx, wz, CELL);
+      } else if (cell === 6) {
+        addWater(group, wx, wz, row, col, CITY_GRID);
+        boxes.push({ minX: wx - CELL / 2, maxX: wx + CELL / 2, minZ: wz - CELL / 2, maxZ: wz + CELL / 2 });
       }
     }
   }
@@ -241,11 +384,12 @@ function addManhole(group, wx, wz) {
 // ── Buildings ────────────────────────────────────────────────────────────────
 function addBuildingCluster(group, cx, cz, cellSize) {
   const styleIdx = Math.floor(seededRand(cx * 13.7, cz * 7.3) * 4);
-  const palette  = STYLE_PALETTES[styleIdx];
+  const palette  = ACTIVE_THEME.palettes[styleIdx];
   const margin   = 1.5;
   const halfCell = cellSize / 2 - margin;
   const n        = 1 + Math.floor(seededRand(cx, cz) * 3);
   const positions = getBuildingPositions(n, halfCell);
+  const boxes = [];
 
   for (let i = 0; i < positions.length; i++) {
     const [bx, bz, bw, bd] = positions[i];
@@ -258,6 +402,10 @@ function addBuildingCluster(group, cx, cz, cellSize) {
     mesh.castShadow  = true;
     mesh.receiveShadow = true;
     group.add(mesh);
+    boxes.push({
+      minX: cx + bx - bw / 2, maxX: cx + bx + bw / 2,
+      minZ: cz + bz - bd / 2, maxZ: cz + bz + bd / 2,
+    });
 
     addWindows(group, cx + bx, height, cz + bz, bw, bd, styleIdx, palette.win);
     addParapet(group, cx + bx, height, cz + bz, bw, bd);
@@ -277,11 +425,12 @@ function addBuildingCluster(group, cx, cz, cellSize) {
       addRooftopDetails(group, cx + bx, height, cz + bz, bw, bd, styleIdx);
     }
 
-    const neonChance = styleIdx === 3 ? 0.65 : 0.12;
+    const neonChance = (styleIdx === 3 ? 0.65 : 0.12) * ACTIVE_THEME.neonScale;
     if (seededRand(cx + bx * 2.3, cz + bz * 1.7) < neonChance) {
       addNeonSign(group, cx + bx, height, cz + bz, bw, bd);
     }
   }
+  return boxes;
 }
 
 function addWindows(group, bx, bh, bz, bw, bd, styleIdx, winStyle) {
@@ -568,6 +717,223 @@ function addBench(group, bx, bz, rotY) {
   g.position.set(bx, 0, bz);
   g.rotation.y = rotY;
   group.add(g);
+}
+
+// ── Landmark: Stadium ────────────────────────────────────────────────────────
+function addStadium(group, cx, cz, cellSize) {
+  // Grass field
+  const field = new THREE.Mesh(new THREE.CircleGeometry(cellSize / 2 - 1.5, 24), MAT_FIELD);
+  field.rotation.x = -Math.PI / 2;
+  field.position.set(cx, 0.03, cz);
+  field.receiveShadow = true;
+  group.add(field);
+
+  // Center circle + halfway line
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.5, 24), MAT_MARK_W);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(cx, 0.05, cz);
+  group.add(ring);
+  const midline = new THREE.Mesh(new THREE.PlaneGeometry(0.3, cellSize - 5), MAT_MARK_W);
+  midline.rotation.x = -Math.PI / 2;
+  midline.position.set(cx, 0.05, cz);
+  group.add(midline);
+
+  // Tiered bleacher rings, open on the south side (entrance gap)
+  const gap = Math.PI * 0.35;
+  const thetaStart = Math.PI / 2 + gap / 2;
+  const thetaLen = Math.PI * 2 - gap;
+  const tiers = [
+    { r: cellSize / 2 - 1.2, h: 4.2 },
+    { r: cellSize / 2 - 2.4, h: 2.8 },
+    { r: cellSize / 2 - 3.6, h: 1.5 },
+  ];
+  for (const { r, h } of tiers) {
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r, h, 28, 1, true, thetaStart, thetaLen),
+      MAT_BLEACHER
+    );
+    wall.position.set(cx, h / 2, cz);
+    wall.castShadow = true;
+    group.add(wall);
+    const trim = new THREE.Mesh(
+      new THREE.CylinderGeometry(r + 0.12, r + 0.12, 0.3, 28, 1, true, thetaStart, thetaLen),
+      MAT_BLEACH_TOP
+    );
+    trim.position.set(cx, h + 0.15, cz);
+    group.add(trim);
+  }
+
+  // Floodlight towers at 4 diagonals
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const px = cx + sx * (cellSize / 2 - 1.5);
+    const pz = cz + sz * (cellSize / 2 - 1.5);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 11, 6), MAT_POLE);
+    pole.position.set(px, 5.5, pz);
+    group.add(pole);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.25), MAT_FLOOD);
+    panel.position.set(px, 11.2, pz);
+    panel.lookAt(cx, 2, cz);
+    group.add(panel);
+  }
+}
+
+// ── Landmark: Construction site ──────────────────────────────────────────────
+function addConstructionSite(group, cx, cz, cellSize) {
+  const dirt = new THREE.Mesh(new THREE.PlaneGeometry(cellSize - 2, cellSize - 2), MAT_DIRT);
+  dirt.rotation.x = -Math.PI / 2;
+  dirt.position.set(cx, 0.03, cz);
+  dirt.receiveShadow = true;
+  group.add(dirt);
+
+  // Half-built steel frame (2 floors of columns + beams) in one corner
+  const fx = cx - 3.5, fz = cz - 3.5;
+  const W = 8, D = 8;
+  for (const [ox, oz] of [[-W/2, -D/2], [W/2, -D/2], [-W/2, D/2], [W/2, D/2], [0, -D/2], [0, D/2]]) {
+    const col = new THREE.Mesh(new THREE.BoxGeometry(0.35, 8, 0.35), MAT_STEEL);
+    col.position.set(fx + ox, 4, fz + oz);
+    col.castShadow = true;
+    group.add(col);
+  }
+  for (const y of [4, 8]) {
+    for (const oz of [-D/2, D/2]) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(W + 0.35, 0.3, 0.3), MAT_STEEL);
+      beam.position.set(fx, y, fz + oz);
+      group.add(beam);
+    }
+    for (const ox of [-W/2, 0, W/2]) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, D), MAT_STEEL);
+      beam.position.set(fx + ox, y, fz);
+      group.add(beam);
+    }
+  }
+  // Poured slab on level 1
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(W, 0.25, D / 2), MAT_GREY_ROOF);
+  slab.position.set(fx, 4.1, fz - D / 4);
+  group.add(slab);
+
+  // Tower crane
+  const kx = cx + 5, kz = cz + 4;
+  const mast = new THREE.Mesh(new THREE.BoxGeometry(0.7, 16, 0.7), MAT_CRANE);
+  mast.position.set(kx, 8, kz);
+  mast.castShadow = true;
+  group.add(mast);
+  const jib = new THREE.Mesh(new THREE.BoxGeometry(13, 0.45, 0.45), MAT_CRANE);
+  jib.position.set(kx - 4, 15.6, kz);
+  jib.castShadow = true;
+  group.add(jib);
+  const counter = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.2), MAT_METAL);
+  counter.position.set(kx + 3, 15.4, kz);
+  group.add(counter);
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 7, 4), MAT_METAL);
+  cable.position.set(kx - 8, 12, kz);
+  group.add(cable);
+  const hook = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.0, 1.0), MAT_STEEL);
+  hook.position.set(kx - 8, 8.2, kz);
+  group.add(hook);
+
+  // Sand pile + cones + barriers
+  const sand = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.6, 10), MAT_DIRT);
+  sand.position.set(cx + 4, 0.8, cz - 5);
+  sand.castShadow = true;
+  group.add(sand);
+  for (const [ox, oz] of [[-6, 5], [-3.5, 6.5], [-1, 5.5], [2, 7]]) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.75, 8), MAT_CONE);
+    cone.position.set(cx + ox, 0.4, cz + oz);
+    group.add(cone);
+  }
+  for (const [ox, oz, ry] of [[-7, 0, Math.PI / 2], [7, -2, Math.PI / 2], [0, -8, 0]]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.5, 0.12), MAT_BARRIER);
+    bar.position.set(cx + ox, 0.7, cz + oz);
+    bar.rotation.y = ry;
+    group.add(bar);
+    for (const lx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.1), MAT_METAL);
+      leg.position.set(cx + ox + (ry ? 0 : lx), 0.35, cz + oz + (ry ? lx : 0));
+      group.add(leg);
+    }
+  }
+}
+
+// ── Landmark: Monument plaza ─────────────────────────────────────────────────
+function addPlaza(group, cx, cz, cellSize) {
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(cellSize - 2, cellSize - 2), MAT_PLAZA);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(cx, 0.03, cz);
+  floor.receiveShadow = true;
+  group.add(floor);
+
+  // Concentric decorative rings
+  for (const r of [3.2, 6.4]) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(r, r + 0.35, 32), MAT_MARK_W);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(cx, 0.045, cz);
+    group.add(ring);
+  }
+
+  // Central obelisk on a stepped base
+  const base1 = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.5, 3.4), MAT_MONUMENT);
+  base1.position.set(cx, 0.25, cz);
+  group.add(base1);
+  const base2 = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 2.4), MAT_MONUMENT);
+  base2.position.set(cx, 0.75, cz);
+  group.add(base2);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.9, 9, 4), MAT_MONUMENT);
+  shaft.rotation.y = Math.PI / 4;
+  shaft.position.set(cx, 5.5, cz);
+  shaft.castShadow = true;
+  group.add(shaft);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.62, 1.2, 4), MAT_GOLD);
+  tip.rotation.y = Math.PI / 4;
+  tip.position.set(cx, 10.6, cz);
+  group.add(tip);
+
+  // Planters at the four corners + benches facing the monument
+  const half = cellSize / 2 - 2;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const pot = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 1.6), MAT_MONUMENT);
+    pot.position.set(cx + sx * half, 0.35, cz + sz * half);
+    group.add(pot);
+    const bush = new THREE.Mesh(new THREE.SphereGeometry(0.75, 8, 6), MAT_TREE_C1);
+    bush.position.set(cx + sx * half, 1.1, cz + sz * half);
+    group.add(bush);
+  }
+  addBench(group, cx - 5.5, cz, Math.PI / 2 * 3);
+  addBench(group, cx + 5.5, cz, Math.PI / 2);
+
+  // Two flag poles
+  for (const ox of [-2.8, 2.8]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 7, 6), MAT_POLE);
+    pole.position.set(cx + ox, 3.5, cz - 5.5);
+    group.add(pole);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.9),
+      new THREE.MeshLambertMaterial({ color: ox < 0 ? 0xcf3434 : 0x2f6fcf, side: THREE.DoubleSide }));
+    flag.position.set(cx + ox + 0.85, 6.4, cz - 5.5);
+    group.add(flag);
+  }
+}
+
+// ── Water (canal cells) ──────────────────────────────────────────────────────
+function addWater(group, cx, cz, row, col, grid) {
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(CELL, CELL), MAT_WATER);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(cx, -0.15, cz);
+  group.add(water);
+
+  // Embankment walls along edges that border non-water cells
+  const rows = grid.length, cols = grid[0].length;
+  const edges = [
+    [row - 1, col, cx, cz - CELL / 2, CELL, 0],   // north
+    [row + 1, col, cx, cz + CELL / 2, CELL, 0],   // south
+    [row, col - 1, cx - CELL / 2, cz, 0.5, CELL], // west
+    [row, col + 1, cx + CELL / 2, cz, 0.5, CELL], // east
+  ];
+  for (const [r, c, ex, ez, w, d] of edges) {
+    const neighbor = (r >= 0 && r < rows && c >= 0 && c < cols) ? grid[r][c] : 6;
+    if (neighbor === 6) continue;
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(w || 0.5, 0.9, d || 0.5), MAT_EMBANK);
+    wall.position.set(ex, 0.45, ez);
+    group.add(wall);
+  }
 }
 
 // ── Building layout helpers ──────────────────────────────────────────────────
