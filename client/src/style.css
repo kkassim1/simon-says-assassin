@@ -144,8 +144,8 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 #instructions-panel h3 { font-size: 1rem; font-weight: 700; color: var(--gold); margin-bottom: 6px; }
 
 .instr-section { display: flex; flex-direction: column; gap: 6px; }
-.instr-cols { display: flex; gap: 16px; }
-.instr-col { flex: 1; }
+.instr-cols { display: flex; gap: 16px; flex-wrap: wrap; }
+.instr-col { flex: 1; min-width: 150px; }
 .instr-col strong { display: block; margin-bottom: 4px; font-size: 0.9rem; }
 #instructions-panel ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
 #instructions-panel li { font-size: 0.88rem; color: #ccc; padding-left: 4px; }
@@ -159,6 +159,7 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 
 /* ── HUD HELP BUTTON & IN-GAME INSTRUCTIONS ── */
 #btn-hud-menu,
+#btn-hud-view,
 #btn-hud-help,
 #btn-hud-settings {
   background: rgba(255,255,255,0.1); border: none; color: #fff;
@@ -166,8 +167,18 @@ input::placeholder { color: rgba(255,255,255,0.35); }
   pointer-events: all;
 }
 #btn-hud-menu:hover,
+#btn-hud-view:hover,
 #btn-hud-help:hover,
 #btn-hud-settings:hover { background: rgba(255,255,255,0.2); }
+#btn-hud-view {
+  min-width: 36px;
+  font-weight: 800;
+  color: var(--gold);
+}
+#btn-hud-view.active {
+  background: rgba(241,196,15,0.22);
+  box-shadow: inset 0 0 0 1px rgba(241,196,15,0.4);
+}
 
 #pause-menu {
   position: absolute; inset: 0; z-index: 180;
@@ -222,6 +233,29 @@ input::placeholder { color: rgba(255,255,255,0.35); }
   color: var(--gold);
 }
 #loading-text { color: #ddd; font-size: 0.95rem; font-weight: 700; }
+#loading-text small {
+  display: block;
+  margin-top: 8px;
+  color: #aaa;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+#loading-text code {
+  color: var(--gold);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#loading-retry {
+  align-self: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 18px;
+  background: linear-gradient(135deg, var(--red), #c0392b);
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
 .loading-bar {
   height: 8px; overflow: hidden; border-radius: 999px;
   background: rgba(255,255,255,0.1);
@@ -525,6 +559,28 @@ input::placeholder { color: rgba(255,255,255,0.35); }
 }
 #health-label { font-size: 0.7rem; color: #aaa; font-weight: 700; letter-spacing: 1px; }
 
+#hidden-badge {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  background: rgba(20, 24, 40, 0.85);
+  border: 1px solid rgba(140, 200, 255, 0.4);
+  color: #9fd4ff;
+  font-weight: 800; font-size: 0.85rem; letter-spacing: 2px;
+  padding: 5px 14px; border-radius: 8px;
+  animation: hiddenPulse 1.6s ease-in-out infinite;
+}
+@keyframes hiddenPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+#minimap {
+  position: absolute; top: 104px; left: 16px;
+  width: 168px; height: 168px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+
 /* ── WANTED STARS ────────────────────────────────── */
 #wanted-display {
   font-size: 1rem; letter-spacing: 2px;
@@ -606,12 +662,14 @@ input::placeholder { color: rgba(255,255,255,0.35); }
   #simon-banner { font-size: 0.95rem; padding: 8px 14px; }
   #target-arrow { bottom: 230px; }
   #health-bar-wrap { top: 50px; }
+  #minimap { top: 90px; width: 110px; height: 110px; }
   #ally-info { font-size: 0.75rem; padding: 4px 8px; }
   #event-feed { max-width: 180px; font-size: 0.76rem; }
 }
 
 /* Landscape on a phone — controls stay small, HUD moves up */
 @media (orientation: landscape) and (max-height: 500px) {
+  #minimap { top: 84px; width: 92px; height: 92px; }
   #task-box { bottom: 130px; }
   #action-hint { bottom: 100px; }
   #target-arrow { bottom: 170px; }

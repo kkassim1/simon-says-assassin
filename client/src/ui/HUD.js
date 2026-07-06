@@ -1,8 +1,10 @@
 import { createSettingsPanel, settingsStore } from './Settings.js';
+import { Minimap } from './Minimap.js';
 
 export class HUD {
-  constructor(container, onLeaveMatch = null) {
+  constructor(container, onLeaveMatch = null, onToggleCameraView = null) {
     this.onLeaveMatch = onLeaveMatch;
+    this.onToggleCameraView = onToggleCameraView;
     this.el = document.createElement('div');
     this.el.id = 'hud';
     this.el.innerHTML = `
@@ -10,6 +12,7 @@ export class HUD {
         <div id="timer-display">⏱ <span id="timer-val">10:00</span></div>
         <div id="score-display">Score: <span id="score-val">0</span></div>
         <div id="wanted-display" style="display:none"></div>
+        <button id="btn-hud-view" title="Toggle camera view">3D</button>
         <button id="btn-hud-menu">☰</button>
         <button id="btn-hud-settings">⚙</button>
         <button id="btn-hud-help">❓</button>
@@ -30,8 +33,9 @@ export class HUD {
           <button id="btn-hud-help-close">✕ Close</button>
           <h3>Controls</h3>
           <div class="instr-cols">
-            <div class="instr-col"><strong>⌨️ Keyboard</strong><ul><li>WASD / Arrows — Move</li><li>E or Space — Act</li><li>Shift — Sprint</li></ul></div>
-            <div class="instr-col"><strong>📱 Mobile</strong><ul><li>Joystick — Move</li><li>ACT — Act</li><li>RUN — Sprint</li></ul></div>
+            <div class="instr-col"><strong>⌨️ Keyboard</strong><ul><li>WASD / Arrows — Move</li><li>E or Space — Act</li><li>Shift — Sprint</li><li>V — Toggle 3D view</li></ul></div>
+            <div class="instr-col"><strong>📱 Mobile</strong><ul><li>Joystick — Move</li><li>ACT — Act</li><li>RUN — Sprint</li><li>3D — Toggle view</li></ul></div>
+            <div class="instr-col"><strong>🎮 Controller</strong><ul><li>Left stick / D-pad — Move</li><li>A or X — Act</li><li>RT / LT / B — Sprint</li><li>Y — Toggle view · Start — Menu</li></ul></div>
           </div>
           <h3>Missions</h3>
           <ul>
@@ -46,6 +50,9 @@ export class HUD {
             <li>💰 Bounty on top player — kill for +200</li>
             <li>🚔 Cop chases bounty player — 30s arrest if caught</li>
             <li>Mash Act to escape a kidnap</li>
+            <li>🕶️ Walk to stay disguised — sprinting/attacking reveals your name</li>
+            <li>🫥 Stand still by park trees, plaza planters, or the sand pile to HIDE — cops and hunters lose you</li>
+            <li>⚡📡💰 Grab pickups on roads: speed boost, radar ping, cash</li>
           </ul>
         </div>
       </div>
@@ -55,6 +62,7 @@ export class HUD {
       </div>
       <div id="ally-info" style="display:none"></div>
       <div id="bounty-banner" style="display:none">💰 BOUNTY on YOU — 🚔 COP IS COMING!</div>
+      <div id="hidden-badge" style="display:none">🫥 HIDDEN</div>
       <div id="simon-banner"></div>
       <div id="task-box">
         <div id="task-icon">🎯</div>
@@ -81,9 +89,13 @@ export class HUD {
       <div id="damage-flash"></div>
     `;
     container.appendChild(this.el);
+    this.minimap = new Minimap(this.el);
     this.settingsPanel = createSettingsPanel(settingsStore);
     container.appendChild(this.settingsPanel.el);
     this._gameTimerInterval = null;
+    this._unsubscribeSettings = settingsStore.subscribe((settings) => {
+      this.setCameraView(settings.cameraView);
+    });
     this._boundKeyDown = this._onKeyDown.bind(this);
     window.addEventListener('keydown', this._boundKeyDown);
 
@@ -118,6 +130,9 @@ export class HUD {
     this.el.querySelector('#btn-hud-help-close').addEventListener('click', () => {
       this.el.querySelector('#hud-instructions').style.display = 'none';
     });
+    this.el.querySelector('#btn-hud-view').addEventListener('click', () => {
+      this.onToggleCameraView?.();
+    });
   }
 
   toggleMenu() {
@@ -131,6 +146,15 @@ export class HUD {
 
   _onKeyDown(event) {
     if (event.key === 'Escape') this.toggleMenu();
+  }
+
+  setCameraView(view) {
+    const btn = this.el.querySelector('#btn-hud-view');
+    if (!btn) return;
+    const is3d = view === 'thirdPerson';
+    btn.textContent = is3d ? '2D' : '3D';
+    btn.title = is3d ? 'Switch to tactical view' : 'Switch to 3D follow view';
+    btn.classList.toggle('active', is3d);
   }
 
   // ── Game timer ───────────────────────────────────
@@ -313,8 +337,20 @@ export class HUD {
   show() { this.el.style.display = 'block'; }
   hide() { this.el.style.display = 'none'; }
 
+  setHiddenBadge(text) {
+    const el = this.el.querySelector('#hidden-badge');
+    el.style.display = text ? 'block' : 'none';
+    if (text) el.textContent = text;
+  }
+
+  updateMinimap(me, cops, waypoint, others) {
+    this.minimap?.update(me, cops, waypoint, others);
+  }
+
   destroy() {
     window.removeEventListener('keydown', this._boundKeyDown);
+    this.minimap?.destroy();
+    this._unsubscribeSettings?.();
     this.settingsPanel?.destroy();
   }
 }

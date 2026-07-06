@@ -4,6 +4,12 @@ import { buildCharacter, animateCharacter, PUNCH_DURATION } from './Character.js
 const SPEED            = 10;
 const SPRINT_MULT      = 1.7;
 const COLLISION_RADIUS = 0.6;
+const CAMERA_VIEWS     = ['tactical', 'thirdPerson'];
+const CAMERA_FOLLOW_DAMPING = 7;
+const CAMERA_LOOK_DAMPING   = 9;
+const CAMERA_YAW_DAMPING    = 5;
+const PLAYER_TURN_DAMPING   = 16;
+const MOVEMENT_INPUT_DAMPING = 14;
 
 let buildingBoxes = [];
 export function setBuildingBoxes(boxes) { buildingBoxes = boxes; }
@@ -17,12 +23,15 @@ export class PlayerController {
 
     this.position  = new THREE.Vector3(0, 0, 0);
     this.rotation  = 0;
+    this._visualRotation = 0;
     this.isAlive   = true;
     this.isCaptured = false;
     this.isDragging = false;
+    this.speedMultiplier = 1;   // pickup boosts
 
     this._animTime   = 0;
     this._punchTimer = 0;
+    this._smoothedInput = new THREE.Vector2();
 
     this.group     = new THREE.Group();
     this.bodyMat   = null;
@@ -31,8 +40,12 @@ export class PlayerController {
     scene.add(this.group);
 
     this.camera       = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+    this.cameraView   = 'tactical';
     this.cameraOffset = new THREE.Vector3(0, 18, 16);
     this.cameraTarget = new THREE.Vector3();
+    this._cameraLookAt = new THREE.Vector3();
+    this._cameraYaw = 0;
+    this._cameraInitialized = false;
   }
 
   _buildMesh() {
@@ -60,6 +73,23 @@ export class PlayerController {
     this.actionRing.material.opacity = visible ? 0.8 : 0;
   }
 
+  setHiddenVisual(hidden) {
+    if (this._hiddenVisual === hidden) return;
+    this._hiddenVisual = hidden;
+    if (!this._bodyMats) {
+      this._bodyMats = [];
+      this.group.traverse((obj) => {
+        if (obj.isMesh && obj !== this.actionRing) {
+          this._bodyMats.push({ mat: obj.material, wasTransparent: obj.material.transparent });
+        }
+      });
+    }
+    for (const { mat, wasTransparent } of this._bodyMats) {
+      mat.transparent = hidden || wasTransparent;
+      mat.opacity = hidden ? 0.35 : 1;
+    }
+  }
+
   update(delta, input, isSprinting) {
     if (!this.isAlive || this.isCaptured) {
       if (this.isCaptured && this._limbs) {
@@ -69,14 +99,16 @@ export class PlayerController {
       return;
     }
 
-    const speed = SPEED * (isSprinting ? SPRINT_MULT : 1);
-    const dx = input.x;
-    const dz = input.y;
-    const moving = Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01;
+    const speed = SPEED * (isSprinting ? SPRINT_MULT : 1) * this.speedMultiplier;
+    const targetInput = this._inputToWorld(input);
+    this._smoothedInput.lerp(targetInput, _dampAlpha(MOVEMENT_INPUT_DAMPING, delta));
+
+    const dx = this._smoothedInput.x;
+    const dz = this._smoothedInput.y;
+    const moving = this._smoothedInput.lengthSq() > 0.0009;
 
     if (moving) {
       this.rotation = Math.atan2(dx, dz);
-      this.group.rotation.y = this.rotation;
 
       const nx = this.position.x + dx * speed * delta;
       const nz = this.position.z + dz * speed * delta;
@@ -90,7 +122,13 @@ export class PlayerController {
       if (stuck || !_collidesWithBuilding(this.position.x, cz)) this.position.z = cz;
     }
 
+    this._visualRotation = _dampAngle(this._visualRotation, this.rotation, PLAYER_TURN_DAMPING, delta);
+    this.group.rotation.y = this._visualRotation;
     this.group.position.copy(this.position);
+
+    // Crouch when hiding: whole body ducks down
+    const targetScaleY = this._hiddenVisual ? 0.62 : 1;
+    this.group.scale.y += (targetScaleY - this.group.scale.y) * _dampAlpha(10, delta);
 
     // Animation
     if (this._limbs) {
@@ -100,6 +138,7 @@ export class PlayerController {
       let state = 'idle';
       if (this.isDragging) state = 'drag';
       else if (moving) state = isSprinting ? 'sprint' : 'walk';
+      else if (this._hiddenVisual) state = 'hide';
 
       const punch = this._punchTimer > 0
         ? 1 - this._punchTimer / PUNCH_DURATION
@@ -112,11 +151,86 @@ export class PlayerController {
     this._punchTimer = PUNCH_DURATION;
   }
 
-  updateCamera() {
-    const target = this.position.clone().add(new THREE.Vector3(0, 1, 0));
-    this.cameraTarget.lerp(target, 0.1);
+  setCameraView(view) {
+    const nextView = CAMERA_VIEWS.includes(view) ? view : 'tactical';
+    const changed = nextView !== this.cameraView;
+    this.cameraView = nextView;
+    this.camera.fov = this.cameraView === 'thirdPerson' ? 68 : 60;
+    this.camera.updateProjectionMatrix();
+    if (changed) {
+      this._cameraYaw = this.rotation;
+      this._cameraInitialized = false;
+    }
+  }
+
+  toggleCameraView() {
+    this.setCameraView(this.cameraView === 'thirdPerson' ? 'tactical' : 'thirdPerson');
+    return this.cameraView;
+  }
+
+  getCameraYaw() {
+    return this.cameraView === 'thirdPerson' ? this._cameraYaw : Math.PI;
+  }
+
+  updateCamera(delta = 1 / 60) {
+    this.updateCameraAt(this.position, this.rotation, delta);
+  }
+
+  updateCameraAt(position, rotation = this.rotation, delta = 1 / 60) {
+    if (this.cameraView === 'thirdPerson') {
+      this._updateThirdPersonCamera(position, rotation, delta);
+    } else {
+      this._updateTacticalCamera(position, delta);
+    }
+  }
+
+  _updateTacticalCamera(position, delta) {
+    const target = position.clone().add(new THREE.Vector3(0, 1, 0));
+    const alpha = _dampAlpha(8, delta);
+    this.cameraTarget.lerp(target, alpha);
     this.camera.position.copy(this.cameraTarget).add(this.cameraOffset);
     this.camera.lookAt(this.cameraTarget);
+  }
+
+  _updateThirdPersonCamera(position, rotation, delta) {
+    this._cameraYaw = _dampAngle(this._cameraYaw, rotation, CAMERA_YAW_DAMPING, delta);
+
+    const forward = new THREE.Vector3(Math.sin(this._cameraYaw), 0, Math.cos(this._cameraYaw));
+    const target = position.clone().add(new THREE.Vector3(0, 2.1, 0));
+    const desired = target.clone()
+      .addScaledVector(forward, -9.5)
+      .add(new THREE.Vector3(0, 3.6, 0));
+    const lookAt = target.clone().addScaledVector(forward, 7);
+
+    if (!this._cameraInitialized) {
+      this.cameraTarget.copy(target);
+      this.camera.position.copy(desired);
+      this._cameraLookAt.copy(lookAt);
+      this._cameraInitialized = true;
+    }
+
+    this.cameraTarget.lerp(target, _dampAlpha(CAMERA_FOLLOW_DAMPING, delta));
+    this.camera.position.lerp(desired, _dampAlpha(CAMERA_FOLLOW_DAMPING, delta));
+    this._cameraLookAt.lerp(lookAt, _dampAlpha(CAMERA_LOOK_DAMPING, delta));
+    this.camera.lookAt(this._cameraLookAt);
+  }
+
+  _inputToWorld(input) {
+    const ix = input.x || 0;
+    const iy = input.y || 0;
+    if (Math.abs(ix) < 0.001 && Math.abs(iy) < 0.001) return new THREE.Vector2(0, 0);
+
+    if (this.cameraView !== 'thirdPerson') return _clampVectorLength(new THREE.Vector2(ix, iy), 1);
+
+    const yaw = this._cameraYaw;
+    const forwardX = Math.sin(yaw);
+    const forwardZ = Math.cos(yaw);
+    const rightX = -Math.cos(yaw);
+    const rightZ = Math.sin(yaw);
+    const worldX = rightX * ix + forwardX * -iy;
+    const worldZ = rightZ * ix + forwardZ * -iy;
+
+    return _clampVectorLength(new THREE.Vector2(worldX, worldZ), 1);
   }
 
   setAlive(alive) {
@@ -148,6 +262,26 @@ function _collidesWithBuilding(x, z) {
     ) return true;
   }
   return false;
+}
+
+function _dampAlpha(lambda, delta) {
+  return 1 - Math.exp(-lambda * Math.min(delta, 0.1));
+}
+
+function _dampAngle(current, target, lambda, delta) {
+  return current + _angleDiff(target, current) * _dampAlpha(lambda, delta);
+}
+
+function _angleDiff(target, current) {
+  let d = target - current;
+  while (d >  Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+function _clampVectorLength(vector, maxLength) {
+  if (vector.lengthSq() > maxLength * maxLength) vector.setLength(maxLength);
+  return vector;
 }
 
 function _makeLabel(text, color) {

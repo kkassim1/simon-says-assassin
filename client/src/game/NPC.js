@@ -6,6 +6,7 @@ const NPC_RADIUS = 0.5;
 
 // Varied skin tones
 const SKIN_TONES = [0xf5cba7, 0xe8b88a, 0xc68642, 0x8d5524, 0xfad9b0, 0xd4956a];
+const HAIR_COLORS = [0x17100c, 0x2c1b12, 0x5a341d, 0x0f0f0f, 0x8a5a2b];
 
 // Varied civilian clothing colors
 const JACKET_COLORS = [
@@ -58,11 +59,14 @@ export class NPC {
     const jacketColor  = isCop ? 0x1d3557 : JACKET_COLORS[this.id % JACKET_COLORS.length];
     const pantsColor   = isCop ? 0x111827 : PANTS_COLORS[this.id % PANTS_COLORS.length];
 
-    const skinM   = new THREE.MeshLambertMaterial({ color: skinColor });
-    const jacketM = new THREE.MeshLambertMaterial({ color: jacketColor });
-    const pantsM  = new THREE.MeshLambertMaterial({ color: pantsColor });
-    const shoeM   = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    const skinM   = humanMaterial(skinColor, 0.78, 0.45);
+    const jacketM = humanMaterial(jacketColor, 0.72, 0.4);
+    const shirtM  = humanMaterial(_lighten(jacketColor, 0.22), 0.75, 0.35);
+    const pantsM  = humanMaterial(pantsColor, 0.82, 0.38);
+    const shoeM   = humanMaterial(0x111111, 0.55, 0.35);
+    const hairM   = humanMaterial(HAIR_COLORS[this.id % HAIR_COLORS.length], 0.82, 0.4);
     const eyeM    = new THREE.MeshBasicMaterial({ color: 0x111111 });
+    const mouthM  = new THREE.MeshBasicMaterial({ color: 0x7a2c2c });
     const badgeM  = new THREE.MeshBasicMaterial({ color: 0xffd447 });
 
     function mk(geo, mat, x, y, z, shadow = true) {
@@ -72,26 +76,35 @@ export class NPC {
       return m;
     }
 
-    // ── Leg pivot groups (pivot at hip) ─────────────────────────
+    // Leg pivot groups (pivot at hip).
+    const legGeo = new THREE.CapsuleGeometry(0.082, 0.45, 4, 9);
+    const shoeGeo = new THREE.BoxGeometry(0.2, 0.12, 0.34);
+
     this._legL = new THREE.Group();
     this._legL.position.set(-0.13, 0.78, 0);
-    this._legL.add(mk(new THREE.BoxGeometry(0.18, 0.58, 0.2),  pantsM, 0, -0.29, 0));
-    this._legL.add(mk(new THREE.BoxGeometry(0.2,  0.15, 0.3),  shoeM,  0, -0.65, 0.03));
+    this._legL.add(mk(legGeo, pantsM, 0, -0.29, 0));
+    const shoeL = mk(shoeGeo, shoeM, 0, -0.62, 0.07);
+    shoeL.rotation.x = -0.08;
+    this._legL.add(shoeL);
     this.group.add(this._legL);
 
     this._legR = new THREE.Group();
     this._legR.position.set(0.13, 0.78, 0);
-    this._legR.add(mk(new THREE.BoxGeometry(0.18, 0.58, 0.2),  pantsM, 0, -0.29, 0));
-    this._legR.add(mk(new THREE.BoxGeometry(0.2,  0.15, 0.3),  shoeM,  0, -0.65, 0.03));
+    this._legR.add(mk(legGeo, pantsM, 0, -0.29, 0));
+    const shoeR = mk(shoeGeo, shoeM, 0, -0.62, 0.07);
+    shoeR.rotation.x = -0.08;
+    this._legR.add(shoeR);
     this.group.add(this._legR);
 
-    // ── Torso ────────────────────────────────────────────────────
-    this.group.add(mk(new THREE.BoxGeometry(0.44, 0.6, 0.24), jacketM, 0, 1.1, 0));
-    if (isCop) this.group.add(mk(new THREE.BoxGeometry(0.12, 0.14, 0.03), badgeM, 0.14, 1.22, 0.135, false));
+    // Torso, hips, and outfit front.
+    this.group.add(mk(new THREE.CapsuleGeometry(0.24, 0.3, 4, 12), jacketM, 0, 1.1, 0));
+    this.group.add(mk(new THREE.BoxGeometry(0.31, 0.28, 0.035), shirtM, 0, 1.11, 0.165, false));
+    this.group.add(mk(new THREE.BoxGeometry(0.36, 0.11, 0.22), pantsM, 0, 0.76, 0));
+    if (isCop) this.group.add(mk(new THREE.BoxGeometry(0.11, 0.12, 0.035), badgeM, 0.12, 1.2, 0.18, false));
 
-    // ── Arm pivot groups ─────────────────────────────────────────
-    const armGeo  = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6);
-    const handGeo = new THREE.SphereGeometry(0.09, 5, 5);
+    // Arm pivot groups.
+    const armGeo  = new THREE.CapsuleGeometry(0.067, 0.38, 4, 9);
+    const handGeo = new THREE.SphereGeometry(0.082, 8, 7);
 
     const shL = new THREE.Group();
     shL.position.set(-0.31, 1.35, 0);
@@ -111,18 +124,33 @@ export class NPC {
     this._armR.add(mk(handGeo, skinM,   0, -0.52, 0, false));
     shR.add(this._armR);
 
-    // ── Neck ─────────────────────────────────────────────────────
-    this.group.add(mk(new THREE.CylinderGeometry(0.09, 0.11, 0.14, 6), skinM, 0, 1.47, 0, false));
+    // Neck and head.
+    this.group.add(mk(new THREE.CylinderGeometry(0.075, 0.095, 0.14, 9), skinM, 0, 1.47, 0, false));
+    this.group.add(mk(new THREE.SphereGeometry(0.22, 16, 12), skinM, 0, 1.77, 0));
 
-    // ── Head ─────────────────────────────────────────────────────
-    this.group.add(mk(new THREE.SphereGeometry(0.24, 7, 7), skinM, 0, 1.79, 0));
+    if (!isCop) {
+      const hair = mk(new THREE.SphereGeometry(0.226, 16, 9, 0, Math.PI * 2, 0, Math.PI * 0.43), hairM, 0, 1.85, -0.02);
+      hair.scale.set(1.04, 0.76, 1);
+      this.group.add(hair);
+    }
+    this.group.add(mk(new THREE.SphereGeometry(0.045, 7, 5), skinM, -0.23, 1.77, 0, false));
+    this.group.add(mk(new THREE.SphereGeometry(0.045, 7, 5), skinM,  0.23, 1.77, 0, false));
 
-    // ── Eyes ─────────────────────────────────────────────────────
-    const eyeGeo = new THREE.SphereGeometry(0.044, 4, 4);
-    this.group.add(mk(eyeGeo, eyeM, -0.09, 1.83, 0.21, false));
-    this.group.add(mk(eyeGeo, eyeM,  0.09, 1.83, 0.21, false));
+    // Face details.
+    const eyeGeo = new THREE.SphereGeometry(0.028, 7, 5);
+    this.group.add(mk(eyeGeo, eyeM, -0.075, 1.8, 0.195, false));
+    this.group.add(mk(eyeGeo, eyeM,  0.075, 1.8, 0.195, false));
+    const browL = mk(new THREE.BoxGeometry(0.08, 0.015, 0.01), hairM, -0.075, 1.865, 0.2, false);
+    browL.rotation.z = 0.1;
+    this.group.add(browL);
+    const browR = mk(new THREE.BoxGeometry(0.08, 0.015, 0.01), hairM, 0.075, 1.865, 0.2, false);
+    browR.rotation.z = -0.1;
+    this.group.add(browR);
+    const nose = mk(new THREE.ConeGeometry(0.028, 0.075, 7), skinM, 0, 1.75, 0.22, false);
+    nose.rotation.x = Math.PI / 2;
+    this.group.add(nose);
+    this.group.add(mk(new THREE.BoxGeometry(0.1, 0.015, 0.01), mouthM, 0, 1.67, 0.205, false));
 
-    // ── Simple hat (varies by id) ────────────────────────────────
     _addHat(this.group, isCop ? 3 : this.id % 3, jacketM);
   }
 
@@ -201,8 +229,8 @@ export class NPC {
 }
 
 function _addHat(group, style, jacketMat) {
-  const darkM  = new THREE.MeshLambertMaterial({ color: 0x111111 });
-  const brownM = new THREE.MeshLambertMaterial({ color: 0x3d2b1f });
+  const darkM  = humanMaterial(0x111111, 0.65, 0.4);
+  const brownM = humanMaterial(0x3d2b1f, 0.78, 0.3);
 
   function mk(geo, mat, x, y, z) {
     const m = new THREE.Mesh(geo, mat);
@@ -230,6 +258,18 @@ function _addHat(group, style, jacketMat) {
       mk(new THREE.BoxGeometry(0.32, 0.04, 0.18), jacketMat, 0, 2.19, 0.22);
       break;
   }
+}
+
+function humanMaterial(color, roughness = 0.72, metalness = 0.35) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness,
+    metalness: metalness * 0.04,
+  });
+}
+
+function _lighten(colorHex, amount) {
+  return new THREE.Color(colorHex).offsetHSL(0, -0.08, amount);
 }
 
 export function createNPCs(scene, count = 10, copCount = 0) {

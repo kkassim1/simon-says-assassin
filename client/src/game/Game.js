@@ -2,25 +2,31 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { buildCity } from './CityMap.js';
+import { buildCity, setCityGrid, setCityTheme, getCityTheme, hideSpotsFromGrid } from './CityMap.js';
 import { PlayerController, setBuildingBoxes } from './PlayerController.js';
-import { RemotePlayer } from './RemotePlayer.js';
+import { RemotePlayer, refreshHideSpots } from './RemotePlayer.js';
+import { DayNight } from './DayNight.js';
 import { createNPCs, setNPCBuildingBoxes } from './NPC.js';
 import { TrafficSystem } from './TrafficSystem.js';
+import { Pickups } from './Pickups.js';
 import { HUD } from '../ui/HUD.js';
 import { SoundManager } from './SoundManager.js';
 import { settingsStore } from '../ui/Settings.js';
 
 const ACTION_RANGE        = 3.5;
+// Hide timings — mirror server/src/GameRoom.js
+const HIDE_DURATION_MS = 7000;
+const HIDE_COOLDOWN_MS = 8000;
 const KIDNAP_DELIVER_RANGE = 4;
 const MOVE_EMIT_RATE      = 50;
 
 export class Game {
-  constructor(network, myId, playerList, container, onLeaveMatch = null) {
+  constructor(network, myId, playerList, container, onLeaveMatch = null, map = null) {
     this.network   = network;
     this.myId      = myId;
     this.container = container;
     this.onLeaveMatch = onLeaveMatch;
+    this.map       = map;
 
     this.scene         = null;
     this.renderer      = null;
@@ -53,9 +59,13 @@ export class Game {
     this._animId       = null;
     this._clock        = new THREE.Clock();
     this._respawnTimer = null;
+    this._boundOnKeyDown = null;
 
     this.cops       = new Map();  // copId -> RemotePlayer
     this.traffic    = null;
+    this.pickups    = null;
+    this._speedBoostTimer = null;
+    this._radarUntil = 0;
     this.isArrested = false;
     this._arrestTimer = null;
 
@@ -65,6 +75,14 @@ export class Game {
 
   init(inputHandler) {
     this.inputHandler = inputHandler;
+
+    if (this.map?.grid) setCityGrid(this.map.grid);
+    setCityTheme(this.map?.id);
+    refreshHideSpots();
+    this._hideSpots = hideSpotsFromGrid();
+    this._localSpeed = 0;
+    this._lastPos = new THREE.Vector3();
+    this.isHiding = false;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x1a2240);
@@ -101,10 +119,13 @@ export class Game {
     sun.position.set(-60, 40, -60);
     this.scene.add(sun);
 
+    this.dayNight = new DayNight(this.scene, ambient, moon, sun, getCityTheme().dayNight);
+
     const buildingBoxes = buildCity(this.scene);
     setBuildingBoxes(buildingBoxes);
     setNPCBuildingBoxes(buildingBoxes);
     this.traffic = new TrafficSystem(this.scene, 30, 7);
+    this.pickups = new Pickups(this.scene);
 
     const me = this._meInfo;
     this.player = new PlayerController(
@@ -114,6 +135,7 @@ export class Game {
       me?.spawnIdx || 0
     );
     if (me) this.player.setPosition(me.x || 0, 0, me.z || 0);
+    this.player.setCameraView(this.settings.cameraView);
 
     for (const p of this._initialPlayers) {
       if (p.id === this.myId) continue;
@@ -128,13 +150,18 @@ export class Game {
       this.sounds.stopAllLoops();
       this.network.leaveRoom();
       this.onLeaveMatch?.();
-    });
+    }, () => this._toggleCameraView());
     this.hud.show();
+    if (this.map?.name) this.hud.addEvent(`🗺️ ${this.map.name}`, 'neutral');
     this._setupPostProcessing();
     this._unsubscribeSettings = settingsStore.subscribe((settings) => this._applySettings(settings));
 
     this._boundOnResize = this._onResize.bind(this);
+    this._boundOnKeyDown = this._onKeyDown.bind(this);
+    this._boundOnGamepad = () => this.hud?.addEvent('🎮 Controller connected — A: act · RT: sprint · Y: view', 'neutral');
     window.addEventListener('resize', this._boundOnResize);
+    window.addEventListener('keydown', this._boundOnKeyDown);
+    window.addEventListener('gamepadconnected', this._boundOnGamepad);
     this._setupNetworkListeners();
     this._loop();
   }
@@ -155,6 +182,10 @@ export class Game {
       this.bountyTargetId    = data.bountyTarget || null;
       this.wantedLevels  = {};
       this.specTarget    = null;
+
+      this.pickups?.dispose();
+      this.player.speedMultiplier = 1;
+      this._radarUntil = 0;
 
       this.myAllyId   = data.allies?.[this.myId] || null;
       this.myAllyName = this.myAllyId
@@ -296,8 +327,27 @@ export class Game {
       }
     });
 
+    net.on('pickup:spawned', (data) => this.pickups?.spawn(data));
+
+    net.on('pickup:removed', (data) => this.pickups?.remove(data.id));
+
+    net.on('pickup:effect', (data) => {
+      if (data.type === 'speed') {
+        this.player.speedMultiplier = 1.5;
+        if (this._speedBoostTimer) clearTimeout(this._speedBoostTimer);
+        this._speedBoostTimer = setTimeout(() => { this.player.speedMultiplier = 1; }, data.duration * 1000);
+        this.hud.addEvent(`⚡ Speed boost! ${data.duration}s`, 'escape');
+        this.sounds.play('task');
+      } else if (data.type === 'radar') {
+        this._radarUntil = Date.now() + data.duration * 1000;
+        this.hud.addEvent(`📡 Radar ping! Everyone visible on the minimap for ${data.duration}s`, 'escape');
+        this.sounds.play('task');
+      }
+    });
+
     net.on('cop:spawned', (data) => {
       const cop = new RemotePlayer(this.scene, data.copId, '🚔 COP', '#5dade2', 0);
+      cop.alwaysVisible = true;
       cop.applyServerState(data.x, 0, data.z, 0);
       this.cops.set(data.copId, cop);
       if (data.targetId === this.myId) {
@@ -410,6 +460,14 @@ export class Game {
         this.hud.setScore(this.scores[this.myId]);
       }
 
+    } else if (type === 'pickup') {
+      this.scores = data.scores || this.scores;
+      this.hud.setScore(this.scores[this.myId] || 0);
+      if (data.actorId === this.myId) {
+        this.hud.addEvent(data.message, 'escape');
+        this.sounds.play('task');
+      }
+
     } else if (type === 'wrong_target') {
       this.hud.addEvent(data.message, 'trap');
       if (data.actorId === this.myId) {
@@ -475,6 +533,7 @@ export class Game {
   _loop() {
     this._animId = requestAnimationFrame(this._loop.bind(this));
     const delta = this._clock.getDelta();
+    this.dayNight?.update(this._clock.elapsedTime);
 
     if (this.gameActive) {
       if (this.player.isAlive) {
@@ -499,20 +558,36 @@ export class Game {
           }
         }
 
+        this._updateHiding(delta);
         this._updateActionHintAndArrow();
         this._checkVehicleHit();
-        this.player.updateCamera();
+        this.player.updateCamera(delta);
+
+        const pickupId = this.pickups?.update(delta, this.player.position);
+        if (pickupId) this.network.sendPickupCollect(pickupId);
+
+        const radarOn = Date.now() < this._radarUntil;
+        this.hud.updateMinimap(
+          { x: this.player.position.x, z: this.player.position.z, rot: this.player.rotation },
+          [...this.cops.values()].map(c => ({ x: c.group.position.x, z: c.group.position.z })),
+          this._currentWaypoint(),
+          radarOn
+            ? [...this.remotePlayers.values()].filter(rp => rp.isAlive)
+                .map(rp => ({ x: rp.group.position.x, z: rp.group.position.z }))
+            : []
+        );
 
       } else {
         if (this.inputHandler.consumeAction()) { /* absorb */ }
-        this._updateSpectatorCam();
+        this._updateSpectatorCam(delta);
       }
     } else {
-      this.player.updateCamera();
+      this.player.updateCamera(delta);
     }
 
-    for (const rp of this.remotePlayers.values()) rp.update(delta);
+    for (const rp of this.remotePlayers.values()) rp.update(delta, this.player.position);
     for (const cop of this.cops.values()) cop.update(delta);
+    if (!this.gameActive || !this.player.isAlive) this.pickups?.update(delta);
     this.traffic?.update(delta);
     for (const npc of this.npcs) npc.update(delta, this.traffic);
     if (this.composer) this.composer.render();
@@ -574,7 +649,7 @@ export class Game {
           const dz = wp.z - this.player.position.z;
           const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
           this.hud.setActionHint(`📍 Patrol: head to ${wp.label} — ${dist}m (${task.currentWaypoint + 1}/${task.waypoints.length})`);
-          this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+          this._setTargetArrow(dx, dz);
           return;
         }
       }
@@ -603,7 +678,7 @@ export class Game {
         const dx = task.locationX - this.player.position.x;
         const dz = task.locationZ - this.player.position.z;
         this.hud.setActionHint(`📦 Bring ${task.targetName} to ${task.locationLabel} — ${Math.round(deliverDist)}m`);
-        this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+        this._setTargetArrow(dx, dz);
       }
       return;
     }
@@ -623,11 +698,11 @@ export class Game {
       this.hud.setActionHint(`${isBounty ? '💰 ' : ''}${task.targetName} — ${Math.round(dist)}m`);
       const dx  = target.group.position.x - this.player.position.x;
       const dz  = target.group.position.z - this.player.position.z;
-      this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+      this._setTargetArrow(dx, dz);
     }
   }
 
-  _updateSpectatorCam() {
+  _updateSpectatorCam(delta) {
     if (!this.specTarget || !this.remotePlayers.get(this.specTarget)?.isAlive) {
       this.specTarget = null;
       for (const [id, rp] of this.remotePlayers) {
@@ -636,9 +711,8 @@ export class Game {
     }
     if (this.specTarget) {
       const pos = this.remotePlayers.get(this.specTarget).group.position;
-      const t   = pos.clone().add(new THREE.Vector3(0, 1, 0));
-      this.player.camera.position.copy(t).add(this.player.cameraOffset);
-      this.player.camera.lookAt(t);
+      const rot = this.remotePlayers.get(this.specTarget).group.rotation.y;
+      this.player.updateCameraAt(pos, rot, delta);
     }
   }
 
@@ -666,6 +740,65 @@ export class Game {
     }, 1000);
   }
 
+  _updateHiding(delta) {
+    if (delta > 0) {
+      const moved = this.player.position.distanceTo(this._lastPos);
+      this._localSpeed += ((moved / delta) - this._localSpeed) * Math.min(1, delta * 6);
+      this._lastPos.copy(this.player.position);
+    }
+
+    let inSpot = false;
+    if (this._localSpeed < 2 && !this.isBeingKidnapped && !this.player.isDragging) {
+      for (const s of this._hideSpots) {
+        const dx = this.player.position.x - s.x, dz = this.player.position.z - s.z;
+        if (dx * dx + dz * dz < s.r * s.r) { inSpot = true; break; }
+      }
+    }
+
+    // Same timer state machine as the server: hide runs out, then cools down
+    const now = Date.now();
+    let hiding = false;
+    let badge = null;
+    if (!inSpot) {
+      this._hideStart = null;
+      if (this._hideCooldownUntil && now < this._hideCooldownUntil) badge = null;
+    } else if (this._hideCooldownUntil && now < this._hideCooldownUntil) {
+      badge = `🫥 SPOTTED — hide again in ${Math.ceil((this._hideCooldownUntil - now) / 1000)}s`;
+    } else {
+      if (!this._hideStart) this._hideStart = now;
+      const left = HIDE_DURATION_MS - (now - this._hideStart);
+      if (left <= 0) {
+        this._hideStart = null;
+        this._hideCooldownUntil = now + HIDE_COOLDOWN_MS;
+      } else {
+        hiding = true;
+        badge = `🫥 HIDDEN ${Math.ceil(left / 1000)}s`;
+      }
+    }
+
+    if (hiding !== this.isHiding) {
+      this.isHiding = hiding;
+      this.player.setHiddenVisual(hiding);
+    }
+    if (badge !== this._hideBadge) {
+      this._hideBadge = badge;
+      this.hud.setHiddenBadge(badge);
+    }
+  }
+
+  _currentWaypoint() {
+    const task = this.myTask;
+    if (!task) return null;
+    if (task.type === 'survive' && task.waypoints) {
+      const wp = task.waypoints[task.currentWaypoint];
+      return wp ? { x: wp.x, z: wp.z } : null;
+    }
+    if (task.type === 'kidnap' && this.kidnappingTarget) {
+      return { x: task.locationX, z: task.locationZ };
+    }
+    return null;
+  }
+
   _distToKidnapLocation() {
     const task = this.myTask;
     if (!task) return Infinity;
@@ -674,12 +807,32 @@ export class Game {
     return Math.sqrt(dx * dx + dz * dz);
   }
 
+  _setTargetArrow(dx, dz) {
+    if (this.settings.cameraView !== 'thirdPerson') {
+      this.hud.setTargetArrow(Math.atan2(dx, -dz) * (180 / Math.PI));
+      return;
+    }
+
+    const targetYaw = Math.atan2(dx, dz);
+    const relativeAngle = _angleDiff(this.player.getCameraYaw(), targetYaw);
+    this.hud.setTargetArrow(relativeAngle * (180 / Math.PI));
+  }
+
   _onResize() {
     this.player.camera.aspect = window.innerWidth / window.innerHeight;
     this.player.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.composer?.setSize(window.innerWidth, window.innerHeight);
     this.bloomPass?.resolution.set(window.innerWidth, window.innerHeight);
+  }
+
+  _onKeyDown(event) {
+    if (event.code === 'KeyV' && !event.repeat) this._toggleCameraView();
+  }
+
+  _toggleCameraView() {
+    const next = this.settings.cameraView === 'thirdPerson' ? 'tactical' : 'thirdPerson';
+    settingsStore.update({ cameraView: next });
   }
 
   _setupPostProcessing() {
@@ -707,6 +860,7 @@ export class Game {
       this.bloomPass.strength = quality === 'high' ? 0.45 : 0.28;
       this.bloomPass.radius = quality === 'high' ? 0.35 : 0.2;
     }
+    this.player?.setCameraView(settings.cameraView);
   }
 
   _pixelRatioForQuality(quality) {
@@ -718,9 +872,14 @@ export class Game {
   destroy() {
     cancelAnimationFrame(this._animId);
     window.removeEventListener('resize', this._boundOnResize);
+    window.removeEventListener('keydown', this._boundOnKeyDown);
+    window.removeEventListener('gamepadconnected', this._boundOnGamepad);
     if (this._respawnTimer) clearInterval(this._respawnTimer);
     if (this._arrestTimer) clearInterval(this._arrestTimer);
+    if (this._speedBoostTimer) clearTimeout(this._speedBoostTimer);
     this._unsubscribeSettings?.();
+    this.pickups?.dispose();
+    this.pickups = null;
     this.sounds.destroy();
     this.traffic?.dispose();
     this.traffic = null;
@@ -736,4 +895,11 @@ export class Game {
       this.container.removeChild(this.hud.el);
     }
   }
+}
+
+function _angleDiff(target, current) {
+  let d = target - current;
+  while (d >  Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
 }

@@ -123,6 +123,11 @@ io.on('connection', (socket) => {
     rooms.get(currentRoom)?.breakFree(socket.id);
   });
 
+  socket.on('action:pickup', ({ pickupId }) => {
+    if (!currentRoom) return;
+    rooms.get(currentRoom)?.collectPickup(socket.id, pickupId);
+  });
+
   socket.on('action:vehicle_hit', ({ vehicleId }) => {
     if (!currentRoom) return;
     rooms.get(currentRoom)?.vehicleHitPlayer(socket.id, vehicleId);

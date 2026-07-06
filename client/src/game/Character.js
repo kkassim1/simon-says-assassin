@@ -3,6 +3,7 @@ import * as THREE from 'three';
 const SKIN_COLOR  = 0xf5cba7;
 const PANTS_COLOR = 0x1a2535;
 const SHOE_COLOR  = 0x111111;
+const HAIR_COLORS = [0x1b120d, 0x2b1b12, 0x5a341f, 0x111111];
 
 export const PUNCH_DURATION = 0.28; // seconds
 
@@ -13,10 +14,12 @@ export const PUNCH_DURATION = 0.28; // seconds
  */
 export function buildCharacter(group, colorHex, hatIdx = 0) {
   const col     = new THREE.Color(colorHex);
-  const jacketM = new THREE.MeshLambertMaterial({ color: col });
-  const skinM   = new THREE.MeshLambertMaterial({ color: SKIN_COLOR });
-  const pantsM  = new THREE.MeshLambertMaterial({ color: PANTS_COLOR });
-  const shoeM   = new THREE.MeshLambertMaterial({ color: SHOE_COLOR });
+  const jacketM = humanMaterial(col, 0.7, 0.45);
+  const shirtM  = humanMaterial(col.clone().offsetHSL(0, -0.16, 0.16), 0.68, 0.5);
+  const skinM   = humanMaterial(SKIN_COLOR, 0.78, 0.45);
+  const pantsM  = humanMaterial(PANTS_COLOR, 0.82, 0.42);
+  const shoeM   = humanMaterial(SHOE_COLOR, 0.55, 0.35);
+  const hairM   = humanMaterial(HAIR_COLORS[hatIdx % HAIR_COLORS.length], 0.8, 0.5);
 
   function add(parent, geo, mat, x, y, z, shadow = true) {
     const m = new THREE.Mesh(geo, mat);
@@ -26,40 +29,40 @@ export function buildCharacter(group, colorHex, hatIdx = 0) {
     return m;
   }
 
-  const legGeo  = new THREE.BoxGeometry(0.2, 0.72, 0.22);
-  const shoeGeo = new THREE.BoxGeometry(0.22, 0.18, 0.36);
-  const armGeo  = new THREE.CylinderGeometry(0.085, 0.085, 0.56, 6);
-  const handGeo = new THREE.SphereGeometry(0.1, 6, 6);
+  const legGeo  = new THREE.CapsuleGeometry(0.095, 0.56, 4, 10);
+  const shoeGeo = new THREE.BoxGeometry(0.23, 0.13, 0.4);
+  const armGeo  = new THREE.CapsuleGeometry(0.075, 0.44, 4, 10);
+  const handGeo = new THREE.SphereGeometry(0.095, 10, 8);
 
-  // ── Leg pivot groups (pivot at hip, y=0.9) ───────────────────
-  // Leg mesh at (0, -0.36, 0) local → world center (-0.16, 0.54, 0) ✓
-  // Shoe at (0, -0.81, 0.04) local → world center (-0.16, 0.09, 0.04) ✓
+  // Leg pivot groups (pivot at hip, y=0.9).
   const legL = new THREE.Group();
   legL.position.set(-0.16, 0.9, 0);
   group.add(legL);
   add(legL, legGeo,  pantsM, 0, -0.36,  0);
-  add(legL, shoeGeo, shoeM,  0, -0.81,  0.04);
+  const shoeL = add(legL, shoeGeo, shoeM,  0, -0.79,  0.08);
+  shoeL.rotation.x = -0.08;
 
   const legR = new THREE.Group();
   legR.position.set(0.16, 0.9, 0);
   group.add(legR);
   add(legR, legGeo,  pantsM, 0, -0.36,  0);
-  add(legR, shoeGeo, shoeM,  0, -0.81,  0.04);
+  const shoeR = add(legR, shoeGeo, shoeM,  0, -0.79,  0.08);
+  shoeR.rotation.x = -0.08;
 
-  // ── Torso ─────────────────────────────────────────────────────
-  add(group, new THREE.BoxGeometry(0.5, 0.66, 0.26), jacketM, 0, 1.23, 0);
+  // Torso, hips, and a simple layered outfit.
+  add(group, new THREE.CapsuleGeometry(0.28, 0.34, 4, 14), jacketM, 0, 1.24, 0);
+  add(group, new THREE.BoxGeometry(0.36, 0.34, 0.04), shirtM, 0, 1.25, 0.18, false);
+  add(group, new THREE.BoxGeometry(0.42, 0.13, 0.25), pantsM, 0, 0.87, 0);
 
-  // ── Arm pivot groups ──────────────────────────────────────────
-  // Outer group: shoulder position + resting outward splay (rotation.z)
-  // Inner group: receives animation rotations (x = fwd/back, z = spread offset)
+  // Arm pivot groups: outer group handles shoulder splay, inner group animates.
   const shoulderL = new THREE.Group();
   shoulderL.position.set(-0.36, 1.50, 0);
   shoulderL.rotation.z = 0.22;
   group.add(shoulderL);
   const armL = new THREE.Group();
   shoulderL.add(armL);
-  add(armL, armGeo,  jacketM, 0, -0.28, 0);
-  add(armL, handGeo, skinM,   0, -0.56, 0, false);
+  add(armL, armGeo,  jacketM, 0, -0.27, 0);
+  add(armL, handGeo, skinM,   0, -0.54, 0, false);
 
   const shoulderR = new THREE.Group();
   shoulderR.position.set(0.36, 1.50, 0);
@@ -67,29 +70,46 @@ export function buildCharacter(group, colorHex, hatIdx = 0) {
   group.add(shoulderR);
   const armR = new THREE.Group();
   shoulderR.add(armR);
-  add(armR, armGeo,  jacketM, 0, -0.28, 0);
-  add(armR, handGeo, skinM,   0, -0.56, 0, false);
+  add(armR, armGeo,  jacketM, 0, -0.27, 0);
+  add(armR, handGeo, skinM,   0, -0.54, 0, false);
 
-  // ── Neck ──────────────────────────────────────────────────────
-  add(group, new THREE.CylinderGeometry(0.1, 0.12, 0.16, 6), skinM, 0, 1.64, 0, false);
+  // Neck and head.
+  add(group, new THREE.CylinderGeometry(0.085, 0.105, 0.18, 10), skinM, 0, 1.66, 0, false);
+  add(group, new THREE.SphereGeometry(0.255, 18, 14), skinM, 0, 1.96, 0);
 
-  // ── Head ──────────────────────────────────────────────────────
-  add(group, new THREE.SphereGeometry(0.27, 8, 8), skinM, 0, 1.99, 0);
+  const hair = add(group, new THREE.SphereGeometry(0.262, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.45), hairM, 0, 2.04, -0.02);
+  hair.scale.set(1.04, 0.74, 1.0);
+  add(group, new THREE.SphereGeometry(0.055, 8, 6), skinM, -0.265, 1.96, 0, false);
+  add(group, new THREE.SphereGeometry(0.055, 8, 6), skinM,  0.265, 1.96, 0, false);
 
-  const eyeM   = new THREE.MeshBasicMaterial({ color: 0x111111 });
-  const eyeGeo = new THREE.SphereGeometry(0.052, 5, 5);
-  add(group, eyeGeo, eyeM, -0.1, 2.02, 0.23, false);
-  add(group, eyeGeo, eyeM,  0.1, 2.02, 0.23, false);
+  const eyeM   = new THREE.MeshBasicMaterial({ color: 0x141414 });
+  const browM  = humanMaterial(hairM.color, 0.8, 0.5);
+  const mouthM = new THREE.MeshBasicMaterial({ color: 0x7a2c2c });
+  const eyeGeo = new THREE.SphereGeometry(0.032, 8, 6);
+  add(group, eyeGeo, eyeM, -0.085, 1.99, 0.235, false);
+  add(group, eyeGeo, eyeM,  0.085, 1.99, 0.235, false);
+  add(group, new THREE.BoxGeometry(0.095, 0.018, 0.012), browM, -0.085, 2.065, 0.24, false).rotation.z = 0.1;
+  add(group, new THREE.BoxGeometry(0.095, 0.018, 0.012), browM,  0.085, 2.065, 0.24, false).rotation.z = -0.1;
+  const nose = add(group, new THREE.ConeGeometry(0.035, 0.095, 8), skinM, 0, 1.94, 0.265, false);
+  nose.rotation.x = Math.PI / 2;
+  add(group, new THREE.BoxGeometry(0.12, 0.018, 0.012), mouthM, 0, 1.84, 0.245, false);
 
-  // ── Hat ───────────────────────────────────────────────────────
   _addHat(group, hatIdx % 4, col);
 
   return { jacketMat: jacketM, legL, legR, armL, armR };
 }
 
+function humanMaterial(color, roughness = 0.72, metalness = 0.35) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness,
+    metalness: metalness * 0.04,
+  });
+}
+
 /**
  * Drives limb rotations each frame.
- * state: 'idle' | 'walk' | 'sprint' | 'drag' | 'captured'
+ * state: 'idle' | 'walk' | 'sprint' | 'drag' | 'captured' | 'hide'
  * punchProgress: 0 = no punch, 0→1 = punch in progress (applied on top of state)
  */
 export function animateCharacter(limbs, animTime, state, punchProgress = 0) {
@@ -136,6 +156,17 @@ export function animateCharacter(limbs, animTime, state, punchProgress = 0) {
       legR.rotation.x = -Math.sin(t * 0.5) * 0.25;
       break;
     }
+    case 'hide': {
+      // Crouched, hugging knees, tiny nervous tremble
+      const t = animTime * 7;
+      legL.rotation.x = 1.05;
+      legR.rotation.x = 1.05;
+      armL.rotation.x = -0.85 + Math.sin(t) * 0.02;
+      armR.rotation.x = -0.85 + Math.sin(t + 0.8) * 0.02;
+      armL.rotation.z =  0.35;
+      armR.rotation.z = -0.35;
+      break;
+    }
     default: { // idle
       const t = animTime * 1.6;   // slow breathing sway
       legL.rotation.x = 0;
@@ -157,10 +188,10 @@ export function animateCharacter(limbs, animTime, state, punchProgress = 0) {
 }
 
 function _addHat(group, style, playerColor) {
-  const darkM  = new THREE.MeshLambertMaterial({ color: 0x111111 });
-  const brownM = new THREE.MeshLambertMaterial({ color: 0x3d2b1f });
-  const colM   = new THREE.MeshLambertMaterial({ color: playerColor });
-  const whiteM = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const darkM  = humanMaterial(0x111111, 0.65, 0.4);
+  const brownM = humanMaterial(0x3d2b1f, 0.78, 0.3);
+  const colM   = humanMaterial(playerColor, 0.72, 0.35);
+  const whiteM = humanMaterial(0xffffff, 0.85, 0.25);
 
   function add(geo, mat, x, y, z) {
     const m = new THREE.Mesh(geo, mat);

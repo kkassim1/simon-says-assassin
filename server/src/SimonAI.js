@@ -9,8 +9,8 @@ const KIDNAP_LOCATIONS = [
 
 // Generate a task for a single player given the current alive opponents.
 // Used in continuous mode whenever a new assignment is needed.
-export function generateTaskForPlayer(player, alivePlayers) {
-  if (!alivePlayers || alivePlayers.length === 0) return _makeSurviveTask();
+export function generateTaskForPlayer(player, alivePlayers, locations = KIDNAP_LOCATIONS) {
+  if (!alivePlayers || alivePlayers.length === 0) return _makeSurviveTask(locations);
 
   const roll        = Math.random();
   const isSimonSays = Math.random() > 0.15; // 85% real tasks
@@ -30,7 +30,7 @@ export function generateTaskForPlayer(player, alivePlayers) {
     };
   } else if (roll < 0.72) {
     const target = _pick(alivePlayers);
-    const loc    = _pick(KIDNAP_LOCATIONS);
+    const loc    = _pick(locations);
     return {
       type: 'kidnap',
       targetId: target.id,
@@ -47,12 +47,12 @@ export function generateTaskForPlayer(player, alivePlayers) {
       trap: !isSimonSays,
     };
   } else {
-    return _makeSurviveTask();
+    return _makeSurviveTask(locations);
   }
 }
 
-function _makeSurviveTask() {
-  const shuffled = [...KIDNAP_LOCATIONS].sort(() => Math.random() - 0.5).slice(0, 2);
+function _makeSurviveTask(locations = KIDNAP_LOCATIONS) {
+  const shuffled = [...locations].sort(() => Math.random() - 0.5).slice(0, 2);
   const waypoints = shuffled.map(loc => ({ x: loc.x, z: loc.z, label: loc.label }));
   return {
     type: 'survive',

@@ -6,6 +6,8 @@ const SERVER_URL = isLocalClient
   ? `http://${window.location.hostname}:3000`
   : (import.meta.env.VITE_SERVER_URL || `http://${window.location.hostname}:3000`);
 
+export { SERVER_URL };
+
 export class Network {
   constructor() {
     this.socket = null;
@@ -20,8 +22,32 @@ export class Network {
       if (fn) fn(data);
     });
 
-    return new Promise((resolve) => {
-      this.socket.on('connect', () => resolve(this.socket.id));
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        this.socket.disconnect();
+        reject(new Error(`Could not connect to Simon server at ${SERVER_URL}.`));
+      }, 8000);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off('connect', onConnect);
+        this.socket.off('connect_error', onConnectError);
+      };
+
+      const onConnect = () => {
+        cleanup();
+        resolve(this.socket.id);
+      };
+
+      const onConnectError = () => {
+        cleanup();
+        this.socket.disconnect();
+        reject(new Error(`Could not connect to Simon server at ${SERVER_URL}.`));
+      };
+
+      this.socket.on('connect', onConnect);
+      this.socket.on('connect_error', onConnectError);
     });
   }
 
@@ -67,6 +93,10 @@ export class Network {
 
   sendBreakFree() {
     this.socket.emit('action:break_free');
+  }
+
+  sendPickupCollect(pickupId) {
+    this.socket.emit('action:pickup', { pickupId });
   }
 
   sendVehicleHit(vehicleId) {

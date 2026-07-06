@@ -1,4 +1,4 @@
-import { Network } from './network/Network.js';
+import { Network, SERVER_URL } from './network/Network.js';
 import { Lobby } from './ui/Lobby.js';
 import { Game } from './game/Game.js';
 import { InputHandler, VirtualInput } from './input/InputHandler.js';
@@ -17,7 +17,13 @@ async function main() {
   showLoading('Connecting to Simon...');
 
   network = new Network();
-  const myId = await network.connect();
+  let myId;
+  try {
+    myId = await network.connect();
+  } catch (error) {
+    showLoadingError(error.message);
+    return;
+  }
   hideLoading();
 
   lobby = new Lobby(appEl, network);
@@ -47,11 +53,12 @@ async function main() {
   });
 
   // Transition from lobby to game on countdown
-  network.on('game:countdown', () => {
-    showLoading('Building city...');
+  network.on('game:countdown', (data) => {
+    const map = data?.map || null;
+    showLoading(map?.name ? `Building ${map.name}...` : 'Building city...');
     lobby.hide();
     requestAnimationFrame(() => {
-      launchGame(latestPlayers, myId, appEl);
+      launchGame(latestPlayers, myId, appEl, map);
       setTimeout(hideLoading, 250);
     });
   });
@@ -62,7 +69,7 @@ async function main() {
   });
 }
 
-function launchGame(players, myId, container) {
+function launchGame(players, myId, container, map = null) {
   if (isMobile) {
     const vi = new VirtualInput();
     inputHandler = vi;
@@ -72,7 +79,7 @@ function launchGame(players, myId, container) {
     inputHandler = new InputHandler();
   }
 
-  game = new Game(network, myId, players, container, returnToLobby);
+  game = new Game(network, myId, players, container, returnToLobby, map);
   game.init(inputHandler);
 }
 
@@ -84,8 +91,12 @@ function createLoadingOverlay(container) {
       <div class="loading-mark">SIMON</div>
       <div id="loading-text">Loading...</div>
       <div class="loading-bar"><span></span></div>
+      <button id="loading-retry" type="button" style="display:none">Retry</button>
     </div>
   `;
+  el.querySelector('#loading-retry').addEventListener('click', () => {
+    window.location.reload();
+  });
   container.appendChild(el);
   return el;
 }
@@ -93,7 +104,21 @@ function createLoadingOverlay(container) {
 function showLoading(text) {
   if (!loadingEl) return;
   loadingEl.querySelector('#loading-text').textContent = text;
+  loadingEl.querySelector('.loading-bar').style.display = 'block';
+  loadingEl.querySelector('#loading-retry').style.display = 'none';
   loadingEl.style.display = 'flex';
+}
+
+function showLoadingError(text) {
+  if (!loadingEl) return;
+  loadingEl.querySelector('#loading-text').innerHTML = `
+    <strong>Could not reach the game server.</strong>
+    <small>${text}<br />For local play, start the backend with <code>cd server && npm run dev</code>.</small>
+  `;
+  loadingEl.querySelector('.loading-bar').style.display = 'none';
+  loadingEl.querySelector('#loading-retry').style.display = 'inline-flex';
+  loadingEl.style.display = 'flex';
+  console.error(`Connection failed. Expected server: ${SERVER_URL}`);
 }
 
 function hideLoading() {
