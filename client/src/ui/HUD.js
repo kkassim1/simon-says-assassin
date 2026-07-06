@@ -1,4 +1,5 @@
 import { createSettingsPanel, settingsStore } from './Settings.js';
+import { Minimap } from './Minimap.js';
 
 export class HUD {
   constructor(container, onLeaveMatch = null, onToggleCameraView = null) {
@@ -83,6 +84,7 @@ export class HUD {
       <div id="damage-flash"></div>
     `;
     container.appendChild(this.el);
+    this.minimap = new Minimap(this.el);
     this.settingsPanel = createSettingsPanel(settingsStore);
     container.appendChild(this.settingsPanel.el);
     this._gameTimerInterval = null;
@@ -330,8 +332,13 @@ export class HUD {
   show() { this.el.style.display = 'block'; }
   hide() { this.el.style.display = 'none'; }
 
+  updateMinimap(me, cops, waypoint) {
+    this.minimap?.update(me, cops, waypoint);
+  }
+
   destroy() {
     window.removeEventListener('keydown', this._boundKeyDown);
+    this.minimap?.destroy();
     this._unsubscribeSettings?.();
     this.settingsPanel?.destroy();
   }

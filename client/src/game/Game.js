@@ -507,6 +507,12 @@ export class Game {
         this._checkVehicleHit();
         this.player.updateCamera(delta);
 
+        this.hud.updateMinimap(
+          { x: this.player.position.x, z: this.player.position.z, rot: this.player.rotation },
+          [...this.cops.values()].map(c => ({ x: c.group.position.x, z: c.group.position.z })),
+          this._currentWaypoint()
+        );
+
       } else {
         if (this.inputHandler.consumeAction()) { /* absorb */ }
         this._updateSpectatorCam(delta);
@@ -667,6 +673,19 @@ export class Game {
       if (remaining <= 0) { clearInterval(this._arrestTimer); this._arrestTimer = null; return; }
       this.hud.showArrestCountdown(remaining);
     }, 1000);
+  }
+
+  _currentWaypoint() {
+    const task = this.myTask;
+    if (!task) return null;
+    if (task.type === 'survive' && task.waypoints) {
+      const wp = task.waypoints[task.currentWaypoint];
+      return wp ? { x: wp.x, z: wp.z } : null;
+    }
+    if (task.type === 'kidnap' && this.kidnappingTarget) {
+      return { x: task.locationX, z: task.locationZ };
+    }
+    return null;
   }
 
   _distToKidnapLocation() {
