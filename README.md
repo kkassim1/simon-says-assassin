@@ -123,9 +123,11 @@ Start command: npm start
 Recommended Render environment variables:
 
 ```text
-CLIENT_ORIGIN=https://your-netlify-site.netlify.app
+CLIENT_ORIGIN=https://simon-says-assassin.netlify.app
 RENDER_EXTERNAL_URL=https://simon-says-assassin.onrender.com
 ```
+
+`CLIENT_ORIGIN` must match the origin serving the game. The link on `kwamkassim.com` opens the Netlify game, so use the Netlify origin above. If the game itself moves to a custom domain, update this value to that origin.
 
 Render provides `PORT` automatically. The server reads `process.env.PORT`, so no hardcoded production port is needed.
 
